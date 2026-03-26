@@ -5,12 +5,8 @@ on:
     branches:
       - main
       - master
-
-  # Проверка каждые 24 часа (в 3:00 UTC)
   schedule:
     - cron: '0 3 * * *'
-
-  # Ручной запуск
   workflow_dispatch:
 
 jobs:
@@ -19,44 +15,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ===== ШАГ 1: Клонирование репозитория =====
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: Nestor53top/Keyboard
           ref: main
 
-      # ===== ШАГ 2: Настройка JDK 17 =====
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # ===== ШАГ 3: Проверка и валидация эмодзи =====
       - name: Validate emoji files
         run: |
-          echo "========================================="
-          echo "  Проверка эмодзи из репозитория"
-          echo "========================================="
-
           EMOJI_DIR="emoji"
           ERRORS=0
           VALID=0
 
           if [ ! -d "$EMOJI_DIR" ]; then
-            echo "❌ ОШИБКА: Папка emoji/ не найдена!"
+            echo "❌ Папка emoji/ не найдена!"
             exit 1
           fi
-
-          FILE_COUNT=$(find "$EMOJI_DIR" -type f | wc -l)
-          if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "❌ ОШИБКА: Папка emoji/ пуста!"
-            exit 1
-          fi
-
-          echo "Найдено файлов: $FILE_COUNT"
-          echo ""
 
           for file in "$EMOJI_DIR"/*; do
             [ ! -f "$file" ] && continue
@@ -64,70 +44,29 @@ jobs:
             ext="${filename##*.}"
             ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
 
-            # ── Проверка 1: только PNG ──
             if [ "$ext_lower" != "png" ]; then
-              echo "❌ ОТКЛОНЁН: $filename — формат .$ext (нужен .png)"
+              echo "❌ ОТКЛОНЁН: $filename (не PNG)"
               ERRORS=$((ERRORS + 1))
-              # Удаляем файл неправильного формата
               rm "$file"
               continue
             fi
 
-            # ── Проверка 2: файл действительно PNG (magic bytes) ──
             MAGIC=$(xxd -l 4 -p "$file" 2>/dev/null)
             if [ "$MAGIC" != "89504e47" ]; then
-              echo "❌ ОТКЛОНЁН: $filename — файл повреждён или не настоящий PNG"
+              echo "❌ ОТКЛОНЁН: $filename (повреждён)"
               ERRORS=$((ERRORS + 1))
               rm "$file"
               continue
             fi
 
-            # ── Проверка 3: размеры изображения ──
-            if command -v identify &>/dev/null; then
-              DIMENSIONS=$(identify -format "%wx%h" "$file" 2>/dev/null)
-              WIDTH=$(echo "$DIMENSIONS" | cut -dx -f1)
-              HEIGHT=$(echo "$DIMENSIONS" | cut -dx -f2)
-
-              if [ "$WIDTH" != "$HEIGHT" ]; then
-                echo "⚠️  ВНИМАНИЕ: $filename — не квадратный (${WIDTH}x${HEIGHT})"
-              fi
-
-              if [ "$WIDTH" -lt 64 ] 2>/dev/null || [ "$HEIGHT" -lt 64 ] 2>/dev/null; then
-                echo "⚠️  ВНИМАНИЕ: $filename — слишком маленький (${WIDTH}x${HEIGHT}, мин. 64x64)"
-              fi
-
-              if [ "$WIDTH" -gt 512 ] 2>/dev/null || [ "$HEIGHT" -gt 512 ] 2>/dev/null; then
-                echo "⚠️  ВНИМАНИЕ: $filename — слишком большой (${WIDTH}x${HEIGHT}, макс. 512x512)"
-              fi
-
-              echo "  ✅ $filename — ${WIDTH}x${HEIGHT} px — OK"
-            else
-              echo "  ✅ $filename — PNG валидный"
-            fi
-
-            # ── Проверка 4: имя файла ──
-            NAME_PART="${filename%.*}"
-            if echo "$NAME_PART" | grep -qP '[^a-zA-Z0-9_\-]'; then
-              echo "  ⚠️  Имя содержит спецсимволы, будет нормализовано"
-            fi
-
+            echo "  ✅ $filename"
             VALID=$((VALID + 1))
           done
 
-          echo ""
-          echo "========================================="
-          echo "  ИТОГО:"
-          echo "  ✅ Валидных PNG: $VALID"
-          echo "  ❌ Отклонённых:  $ERRORS"
-          echo "========================================="
+          echo "Валидных: $VALID | Отклонённых: $ERRORS"
+          [ "$VALID" -eq 0 ] && exit 1 || true
 
-          if [ "$VALID" -eq 0 ]; then
-            echo "❌ Нет ни одного валидного PNG эмодзи!"
-            exit 1
-          fi
-
-      # ===== ШАГ 4: Создание структуры Android-проекта =====
-      - name: Create Android project structure
+      - name: Create Android project
         run: |
           mkdir -p app/src/main/java/com/custom/keyboard
           mkdir -p app/src/main/res/drawable
@@ -138,9 +77,7 @@ jobs:
           mkdir -p app/src/main/assets/emoji
           mkdir -p gradle/wrapper
 
-          # ============================================
-          # settings.gradle.kts
-          # ============================================
+          # ── settings.gradle.kts ──
           cat > settings.gradle.kts << 'EOF'
           pluginManagement {
               repositories {
@@ -160,9 +97,7 @@ jobs:
           include(":app")
           EOF
 
-          # ============================================
-          # build.gradle.kts (корневой)
-          # ============================================
+          # ── build.gradle.kts (root) ──
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application") version "8.2.0" apply false
@@ -170,21 +105,16 @@ jobs:
           }
           EOF
 
-          # ============================================
-          # gradle.properties
-          # ============================================
+          # ── gradle.properties ──
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8
           org.gradle.parallel=true
           org.gradle.caching=true
           android.useAndroidX=true
           android.nonTransitiveRClass=true
-          kotlin.code.style=official
           EOF
 
-          # ============================================
-          # gradle-wrapper.properties
-          # ============================================
+          # ── gradle-wrapper.properties ──
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -195,9 +125,7 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-          # ============================================
-          # app/build.gradle.kts
-          # ============================================
+          # ── app/build.gradle.kts ──
           cat > app/build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application")
@@ -217,12 +145,8 @@ jobs:
               }
 
               buildTypes {
-                  debug {
-                      isMinifyEnabled = false
-                  }
-                  release {
-                      isMinifyEnabled = false
-                  }
+                  debug { isMinifyEnabled = false }
+                  release { isMinifyEnabled = false }
               }
 
               compileOptions {
@@ -230,13 +154,8 @@ jobs:
                   targetCompatibility = JavaVersion.VERSION_17
               }
 
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-
-              aaptOptions {
-                  noCompress += listOf("png")
-              }
+              kotlinOptions { jvmTarget = "17" }
+              aaptOptions { noCompress += listOf("png") }
           }
 
           dependencies {
@@ -248,9 +167,9 @@ jobs:
           }
           EOF
 
-          # ============================================
-          # AndroidManifest.xml
-          # ============================================
+          # ══════════════════════════════════════════════
+          # AndroidManifest.xml — С FileProvider ДЛЯ КАРТИНОК
+          # ══════════════════════════════════════════════
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -283,13 +202,22 @@ jobs:
                           android:name="android.view.im"
                           android:resource="@xml/method" />
                   </service>
+
+                  <!-- FileProvider для отправки картинок в другие приложения -->
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
               </application>
           </manifest>
           EOF
 
-          # ============================================
-          # res/xml/method.xml
-          # ============================================
+          # ── res/xml/method.xml ──
           cat > app/src/main/res/xml/method.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <input-method
@@ -303,9 +231,17 @@ jobs:
           </input-method>
           EOF
 
-          # ============================================
-          # res/values/strings.xml
-          # ============================================
+          # ══════════════════════════════════════════════
+          # res/xml/file_paths.xml — ПУТИ ДЛЯ FileProvider
+          # ══════════════════════════════════════════════
+          cat > app/src/main/res/xml/file_paths.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths>
+              <cache-path name="emoji_images" path="emoji/" />
+          </paths>
+          EOF
+
+          # ── res/values/strings.xml ──
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -317,9 +253,7 @@ jobs:
           </resources>
           EOF
 
-          # ============================================
-          # res/values/colors.xml
-          # ============================================
+          # ── res/values/colors.xml ──
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -332,9 +266,7 @@ jobs:
           </resources>
           EOF
 
-          # ============================================
-          # res/values/dimens.xml
-          # ============================================
+          # ── res/values/dimens.xml ──
           cat > app/src/main/res/values/dimens.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -345,9 +277,7 @@ jobs:
           </resources>
           EOF
 
-          # ============================================
-          # res/drawable/ic_keyboard.xml
-          # ============================================
+          # ── res/drawable/ic_keyboard.xml ──
           cat > app/src/main/res/drawable/ic_keyboard.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -361,9 +291,7 @@ jobs:
           </vector>
           EOF
 
-          # ============================================
-          # res/drawable/emoji_item_bg.xml
-          # ============================================
+          # ── res/drawable/emoji_item_bg.xml ──
           cat > app/src/main/res/drawable/emoji_item_bg.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ripple xmlns:android="http://schemas.android.com/apk/res/android"
@@ -377,9 +305,7 @@ jobs:
           </ripple>
           EOF
 
-          # ============================================
-          # res/layout/keyboard_view.xml
-          # ============================================
+          # ── res/layout/keyboard_view.xml ──
           cat > app/src/main/res/layout/keyboard_view.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout
@@ -430,9 +356,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # ============================================
-          # res/layout/item_emoji.xml
-          # ============================================
+          # ── res/layout/item_emoji.xml ──
           cat > app/src/main/res/layout/item_emoji.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout
@@ -451,9 +375,7 @@ jobs:
           </FrameLayout>
           EOF
 
-          # ============================================
-          # res/layout/activity_settings.xml
-          # ============================================
+          # ── res/layout/activity_settings.xml ──
           cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout
@@ -515,9 +437,11 @@ jobs:
           </LinearLayout>
           EOF
 
-          echo "✅ Все ресурсы созданы"
+          echo "✅ Ресурсы созданы"
 
-      # ===== ШАГ 5: Создание Kotlin-кода =====
+      # ══════════════════════════════════════════════════════
+      # ШАГ 5: KOTLIN КОД — ГЛАВНОЕ ИСПРАВЛЕНИЕ
+      # ══════════════════════════════════════════════════════
       - name: Create Kotlin source code
         run: |
           K="app/src/main/java/com/custom/keyboard"
@@ -551,8 +475,6 @@ jobs:
 
               fun loadAll(ctx: Context): List<EmojiItem> {
                   val list = mutableListOf<EmojiItem>()
-
-                  // Попытка 1: через catalog.json
                   try {
                       val json = ctx.assets.open(CATALOG)
                           .bufferedReader().use { it.readText() }
@@ -561,46 +483,35 @@ jobs:
                           val obj = arr.getJSONObject(i)
                           val name = obj.getString("name")
                           val file = obj.getString("file")
-
-                          // Только PNG
                           if (!file.lowercase().endsWith(".png")) continue
-
                           val bmp = try {
                               ctx.assets.open("$DIR/$file").use {
                                   BitmapFactory.decodeStream(it)
                               }
                           } catch (e: Exception) { null }
-
                           if (bmp != null) list.add(EmojiItem(name, file, bmp))
                       }
                   } catch (e: Exception) {
                       Log.e(TAG, "Catalog failed", e)
-
-                      // Попытка 2: сканирование папки
                       try {
                           val files = ctx.assets.list(DIR) ?: emptyArray()
                           for (f in files.sorted()) {
                               if (f == "catalog.json") continue
                               if (!f.lowercase().endsWith(".png")) continue
-
                               val bmp = try {
                                   ctx.assets.open("$DIR/$f").use {
                                       BitmapFactory.decodeStream(it)
                                   }
                               } catch (ex: Exception) { null }
-
-                              if (bmp != null) {
-                                  list.add(EmojiItem(
-                                      f.substringBeforeLast("."), f, bmp
-                                  ))
-                              }
+                              if (bmp != null) list.add(
+                                  EmojiItem(f.substringBeforeLast("."), f, bmp)
+                              )
                           }
                       } catch (ex: Exception) {
                           Log.e(TAG, "Scan failed", ex)
                       }
                   }
-
-                  Log.i(TAG, "Loaded ${list.size} PNG emoji")
+                  Log.i(TAG, "Loaded ${list.size} emoji")
                   return list
               }
           }
@@ -640,23 +551,45 @@ jobs:
           }
           EOF
 
-          # ── EmojiKeyboardService.kt ──
-          cat > "$K/EmojiKeyboardService.kt" << 'EOF'
+          # ══════════════════════════════════════════════
+          # EmojiKeyboardService.kt — ОТПРАВКА КАРТИНОК
+          # ══════════════════════════════════════════════
+          cat > "$K/EmojiKeyboardService.kt" << 'KOTLIN_EOF'
           package com.custom.keyboard
 
+          import android.content.ClipDescription
+          import android.graphics.Bitmap
           import android.inputmethodservice.InputMethodService
+          import android.net.Uri
+          import android.util.Log
           import android.view.View
+          import android.view.inputmethod.EditorInfo
+          import android.view.inputmethod.InputConnection
           import android.widget.ImageButton
           import android.widget.TextView
           import android.widget.Toast
+          import androidx.core.content.FileProvider
+          import androidx.core.view.inputmethod.EditorInfoCompat
+          import androidx.core.view.inputmethod.InputConnectionCompat
+          import androidx.core.view.inputmethod.InputContentInfoCompat
           import androidx.recyclerview.widget.GridLayoutManager
           import androidx.recyclerview.widget.RecyclerView
+          import java.io.File
+          import java.io.FileOutputStream
 
           class EmojiKeyboardService : InputMethodService() {
 
+              companion object {
+                  private const val TAG = "EmojiKeyboard"
+                  private const val MIME_PNG = "image/png"
+                  private const val AUTHORITY_SUFFIX = ".fileprovider"
+              }
+
+              private lateinit var emojis: List<EmojiItem>
+
               override fun onCreateInputView(): View {
                   val view = layoutInflater.inflate(R.layout.keyboard_view, null)
-                  val emojis = EmojiLoader.loadAll(this)
+                  emojis = EmojiLoader.loadAll(this)
 
                   view.findViewById<TextView>(R.id.tvCount).text =
                       getString(R.string.emoji_count, emojis.size)
@@ -664,10 +597,7 @@ jobs:
                   val rv = view.findViewById<RecyclerView>(R.id.rvEmoji)
                   rv.layoutManager = GridLayoutManager(this, 6)
                   rv.adapter = EmojiAdapter(emojis) { emoji ->
-                      currentInputConnection?.commitText(
-                          ":${emoji.name}:", 1
-                      )
-                      Toast.makeText(this, emoji.name, Toast.LENGTH_SHORT).show()
+                      sendEmoji(emoji)
                   }
 
                   view.findViewById<ImageButton>(R.id.btnBackspace).apply {
@@ -682,8 +612,129 @@ jobs:
 
                   return view
               }
+
+              private fun sendEmoji(emoji: EmojiItem) {
+                  val ic = currentInputConnection ?: return
+                  val ei = currentInputEditorInfo ?: return
+
+                  // Проверяем поддерживает ли приложение приём картинок
+                  val mimeTypes = EditorInfoCompat.getContentMimeTypes(ei)
+                  val supportsImage = mimeTypes.any {
+                      ClipDescription.compareMimeTypes(it, MIME_PNG) ||
+                      ClipDescription.compareMimeTypes(it, "image/*")
+                  }
+
+                  if (supportsImage) {
+                      // ── ПУТЬ 1: Отправка как картинка (Telegram, WhatsApp и др.) ──
+                      val sent = commitEmojiImage(emoji, ic, ei)
+                      if (sent) {
+                          Log.i(TAG, "Sent image: ${emoji.name}")
+                          return
+                      }
+                  }
+
+                  // ── ПУТЬ 2: Копирование в буфер обмена как картинка ──
+                  val copied = copyImageToClipboard(emoji)
+                  if (copied) {
+                      Toast.makeText(
+                          this,
+                          "${emoji.name} скопирован — вставьте из буфера",
+                          Toast.LENGTH_SHORT
+                      ).show()
+                  }
+              }
+
+              /**
+               * Отправляет эмодзи как изображение через Commit Content API
+               * Работает в Telegram, WhatsApp, Signal, Discord и др.
+               */
+              private fun commitEmojiImage(
+                  emoji: EmojiItem,
+                  ic: InputConnection,
+                  ei: EditorInfo
+              ): Boolean {
+                  return try {
+                      // 1. Сохраняем PNG в кэш
+                      val emojiDir = File(cacheDir, "emoji")
+                      emojiDir.mkdirs()
+                      val file = File(emojiDir, emoji.fileName)
+
+                      if (!file.exists() || file.length() == 0L) {
+                          FileOutputStream(file).use { out ->
+                              emoji.bitmap?.compress(
+                                  Bitmap.CompressFormat.PNG, 100, out
+                              )
+                          }
+                      }
+
+                      // 2. Получаем content:// URI через FileProvider
+                      val authority = "$packageName$AUTHORITY_SUFFIX"
+                      val contentUri: Uri = FileProvider.getUriForFile(
+                          this, authority, file
+                      )
+
+                      // 3. Создаём описание контента
+                      val description = ClipDescription(emoji.name, arrayOf(MIME_PNG))
+                      val contentInfo = InputContentInfoCompat(
+                          contentUri, description, null
+                      )
+
+                      // 4. Отправляем в приложение
+                      val flags = InputConnectionCompat
+                          .INPUT_CONTENT_GRANT_READ_URI_PERMISSION
+
+                      InputConnectionCompat.commitContent(
+                          ic, ei, contentInfo, flags, null
+                      )
+                  } catch (e: Exception) {
+                      Log.e(TAG, "commitContent failed: ${emoji.name}", e)
+                      false
+                  }
+              }
+
+              /**
+               * Копирует эмодзи в буфер обмена как картинку
+               * Запасной вариант для приложений без Commit Content API
+               */
+              private fun copyImageToClipboard(emoji: EmojiItem): Boolean {
+                  return try {
+                      val emojiDir = File(cacheDir, "emoji")
+                      emojiDir.mkdirs()
+                      val file = File(emojiDir, emoji.fileName)
+
+                      if (!file.exists() || file.length() == 0L) {
+                          FileOutputStream(file).use { out ->
+                              emoji.bitmap?.compress(
+                                  Bitmap.CompressFormat.PNG, 100, out
+                              )
+                          }
+                      }
+
+                      val authority = "$packageName$AUTHORITY_SUFFIX"
+                      val uri = FileProvider.getUriForFile(this, authority, file)
+
+                      val clipboard = getSystemService(CLIPBOARD_SERVICE)
+                          as android.content.ClipboardManager
+                      val clip = android.content.ClipData.newUri(
+                          contentResolver, emoji.name, uri
+                      )
+                      clipboard.setPrimaryClip(clip)
+
+                      // Даём разрешение на чтение
+                      grantUriPermission(
+                          "com.android.systemui",
+                          uri,
+                          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                      )
+
+                      true
+                  } catch (e: Exception) {
+                      Log.e(TAG, "Clipboard copy failed: ${emoji.name}", e)
+                      false
+                  }
+              }
           }
-          EOF
+          KOTLIN_EOF
 
           # ── SettingsActivity.kt ──
           cat > "$K/SettingsActivity.kt" << 'EOF'
@@ -725,45 +776,25 @@ jobs:
 
           echo "✅ Kotlin-код создан"
 
-      # ===== ШАГ 6: Копирование ТОЛЬКО PNG эмодзи =====
-      - name: Copy PNG emoji to app resources
+      - name: Copy PNG emoji to resources
         run: |
           EMOJI_SRC="emoji"
           DRAWABLE="app/src/main/res/drawable-nodpi"
           ASSETS="app/src/main/assets/emoji"
-
           count=0
-          skipped=0
 
           for file in "$EMOJI_SRC"/*; do
             [ ! -f "$file" ] && continue
             filename=$(basename "$file")
-            ext="${filename##*.}"
-            ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
+            ext_lower=$(echo "${filename##*.}" | tr '[:upper:]' '[:lower:]')
+            [ "$ext_lower" != "png" ] && continue
 
-            # ── СТРОГО ТОЛЬКО PNG ──
-            if [ "$ext_lower" != "png" ]; then
-              echo "  ⛔ ПРОПУСК: $filename (не PNG)"
-              skipped=$((skipped + 1))
-              continue
-            fi
-
-            # Проверка magic bytes
             MAGIC=$(xxd -l 4 -p "$file" 2>/dev/null)
-            if [ "$MAGIC" != "89504e47" ]; then
-              echo "  ⛔ ПРОПУСК: $filename (повреждённый PNG)"
-              skipped=$((skipped + 1))
-              continue
-            fi
+            [ "$MAGIC" != "89504e47" ] && continue
 
-            # Нормализация имени для Android
             safe=$(echo "${filename%.*}" \
               | tr '[:upper:]' '[:lower:]' \
-              | sed 's/[^a-z0-9_]/_/g' \
-              | sed 's/__*/_/g' \
-              | sed 's/^_//;s/_$//')
-
-            # Имя должно начинаться с буквы
+              | sed 's/[^a-z0-9_]/_/g;s/__*/_/g;s/^_//;s/_$//')
             [[ ! "$safe" =~ ^[a-z] ]] && safe="emoji_${safe}"
 
             cp "$file" "$DRAWABLE/${safe}.png"
@@ -772,13 +803,8 @@ jobs:
             count=$((count + 1))
           done
 
-          echo ""
-          echo "══════════════════════════════"
-          echo "  PNG скопировано: $count"
-          echo "  Пропущено:      $skipped"
-          echo "══════════════════════════════"
+          echo "PNG скопировано: $count"
 
-      # ===== ШАГ 7: Генерация каталога =====
       - name: Generate emoji catalog
         run: |
           CATALOG="app/src/main/assets/emoji/catalog.json"
@@ -788,36 +814,24 @@ jobs:
           for file in app/src/main/assets/emoji/*.png; do
             [ ! -f "$file" ] && continue
             fn=$(basename "$file")
-
             [ "$first" = true ] && first=false || echo "," >> "$CATALOG"
             printf '  {"name":"%s","file":"%s"}' "${fn%.png}" "$fn" >> "$CATALOG"
           done
 
           echo "" >> "$CATALOG"
           echo "]" >> "$CATALOG"
-
-          echo "catalog.json:"
           cat "$CATALOG"
 
-      # ===== ШАГ 8: Установка Gradle Wrapper =====
       - name: Install Gradle Wrapper
         run: |
           GRADLE_VER="8.5"
-
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            curl -sL \
-              "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" \
-              -o /tmp/gradle.zip
-            unzip -q /tmp/gradle.zip -d /tmp/
-            /tmp/gradle-${GRADLE_VER}/bin/gradle wrapper \
-              --gradle-version ${GRADLE_VER} --no-daemon
-            rm -rf /tmp/gradle*
-          fi
-
+          curl -sL "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/
+          /tmp/gradle-${GRADLE_VER}/bin/gradle wrapper --gradle-version ${GRADLE_VER} --no-daemon
+          rm -rf /tmp/gradle*
           chmod +x gradlew
           ./gradlew --version
 
-      # ===== ШАГ 9: Кэширование Gradle =====
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -826,27 +840,20 @@ jobs:
             ~/.gradle/wrapper
             .gradle
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
+          restore-keys: ${{ runner.os }}-gradle-
 
-      # ===== ШАГ 10: Сборка Debug APK =====
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC"
 
-      # ===== ШАГ 11: Сборка Release APK =====
       - name: Build Release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
         continue-on-error: true
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC"
 
-      # ===== ШАГ 12: Список APK =====
       - name: List APK files
         run: find . -name "*.apk" -type f -exec ls -lh {} \;
 
-      # ===== ШАГ 13: Загрузка Debug APK =====
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
@@ -855,7 +862,6 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-      # ===== ШАГ 14: Загрузка Release APK =====
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
@@ -864,45 +870,16 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
-      # ===== ШАГ 15: Сводка =====
       - name: Build Summary
         if: always()
         run: |
           echo "## 📱 Custom Emoji Keyboard" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Репозиторий:** Nestor53top/Keyboard" >> $GITHUB_STEP_SUMMARY
-          echo "**Триггер:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
           emoji_count=$(ls app/src/main/assets/emoji/*.png 2>/dev/null | wc -l)
           echo "### 😀 PNG emoji: ${emoji_count}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "| Файл | Размер |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-
-          for png in app/src/main/assets/emoji/*.png; do
-            [ ! -f "$png" ] && continue
-            fn=$(basename "$png")
-            sz=$(du -h "$png" | cut -f1)
-            echo "| 🖼️ $fn | $sz |" >> $GITHUB_STEP_SUMMARY
-          done
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 APK:" >> $GITHUB_STEP_SUMMARY
 
           if ls app/build/outputs/apk/debug/*.apk 1>/dev/null 2>&1; then
             for apk in app/build/outputs/apk/debug/*.apk; do
               sz=$(du -h "$apk" | cut -f1)
               echo "- ✅ **Debug:** \`$(basename $apk)\` ($sz)" >> $GITHUB_STEP_SUMMARY
-            done
-          else
-            echo "- ❌ Debug failed" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if ls app/build/outputs/apk/release/*.apk 1>/dev/null 2>&1; then
-            for apk in app/build/outputs/apk/release/*.apk; do
-              sz=$(du -h "$apk" | cut -f1)
-              echo "- ✅ **Release:** \`$(basename $apk)\` ($sz)" >> $GITHUB_STEP_SUMMARY
             done
           fi
