@@ -21,13 +21,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ===== ШАГ 2: Настройка JDK 17 =====
+      # ===== ШАГ 2: Настройка JDK 17 (БЕЗ кэша — файлов gradle ещё нет) =====
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
+          # НЕ указываем cache здесь — gradle-файлы создаются позже
 
       # ===== ШАГ 3: Создание всей структуры Android-проекта =====
       - name: Create complete Android project structure
@@ -36,8 +36,8 @@ jobs:
           echo "  Создание структуры Android-проекта"
           echo "========================================="
 
-          # ---------- Директории ----------
           mkdir -p app/src/main/java/com/custom/keyboard
+          mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/drawable-nodpi
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
@@ -48,7 +48,7 @@ jobs:
           # ==============================================
           # settings.gradle.kts
           # ==============================================
-          cat > settings.gradle.kts << 'SETTINGS_EOF'
+          cat > settings.gradle.kts << 'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -65,34 +65,34 @@ jobs:
           }
           rootProject.name = "CustomEmojiKeyboard"
           include(":app")
-          SETTINGS_EOF
+          EOF
 
           # ==============================================
           # build.gradle.kts (корневой)
           # ==============================================
-          cat > build.gradle.kts << 'ROOT_GRADLE_EOF'
+          cat > build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application") version "8.2.0" apply false
               id("org.jetbrains.kotlin.android") version "1.9.21" apply false
           }
-          ROOT_GRADLE_EOF
+          EOF
 
           # ==============================================
           # gradle.properties
           # ==============================================
-          cat > gradle.properties << 'PROPS_EOF'
+          cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8
           org.gradle.parallel=true
           org.gradle.caching=true
           android.useAndroidX=true
           android.nonTransitiveRClass=true
           kotlin.code.style=official
-          PROPS_EOF
+          EOF
 
           # ==============================================
-          # Gradle Wrapper
+          # gradle-wrapper.properties
           # ==============================================
-          cat > gradle/wrapper/gradle-wrapper.properties << 'WRAPPER_EOF'
+          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
           distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-bin.zip
@@ -100,12 +100,12 @@ jobs:
           validateDistributionUrl=true
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
-          WRAPPER_EOF
+          EOF
 
           # ==============================================
           # app/build.gradle.kts
           # ==============================================
-          cat > app/build.gradle.kts << 'APP_GRADLE_EOF'
+          cat > app/build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
@@ -126,7 +126,6 @@ jobs:
               buildTypes {
                   debug {
                       isMinifyEnabled = false
-                      applicationIdSuffix = ".debug"
                   }
                   release {
                       isMinifyEnabled = false
@@ -154,15 +153,14 @@ jobs:
               implementation("androidx.recyclerview:recyclerview:1.3.2")
               implementation("androidx.constraintlayout:constraintlayout:2.1.4")
           }
-          APP_GRADLE_EOF
+          EOF
 
           # ==============================================
           # AndroidManifest.xml
           # ==============================================
-          cat > app/src/main/AndroidManifest.xml << 'MANIFEST_EOF'
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
               <application
                   android:allowBackup="true"
                   android:icon="@drawable/ic_keyboard"
@@ -170,7 +168,6 @@ jobs:
                   android:supportsRtl="true"
                   android:theme="@style/Theme.MaterialComponents.Light.NoActionBar">
 
-                  <!-- Настройки клавиатуры -->
                   <activity
                       android:name=".SettingsActivity"
                       android:exported="true"
@@ -181,7 +178,6 @@ jobs:
                       </intent-filter>
                   </activity>
 
-                  <!-- Сервис клавиатуры -->
                   <service
                       android:name=".EmojiKeyboardService"
                       android:exported="true"
@@ -196,12 +192,12 @@ jobs:
                   </service>
               </application>
           </manifest>
-          MANIFEST_EOF
+          EOF
 
           # ==============================================
-          # res/xml/method.xml (конфигурация input method)
+          # res/xml/method.xml
           # ==============================================
-          cat > app/src/main/res/xml/method.xml << 'METHOD_EOF'
+          cat > app/src/main/res/xml/method.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <input-method
               xmlns:android="http://schemas.android.com/apk/res/android"
@@ -212,27 +208,26 @@ jobs:
                   android:label="Emoji Keyboard"
                   android:imeSubtypeLocale="en_US" />
           </input-method>
-          METHOD_EOF
+          EOF
 
           # ==============================================
           # res/values/strings.xml
           # ==============================================
-          cat > app/src/main/res/values/strings.xml << 'STRINGS_EOF'
+          cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">Custom Emoji Keyboard</string>
               <string name="keyboard_name">Emoji Keyboard</string>
-              <string name="settings_title">Keyboard Settings</string>
-              <string name="enable_keyboard_hint">Enable the keyboard in Settings → System → Languages &amp; Input → On-screen keyboard</string>
+              <string name="enable_keyboard_hint">Enable in Settings → System → Languages → On-screen keyboard</string>
               <string name="emoji_count_label">Custom emoji loaded: %d</string>
               <string name="no_emoji_found">No custom emoji found</string>
           </resources>
-          STRINGS_EOF
+          EOF
 
           # ==============================================
           # res/values/colors.xml
           # ==============================================
-          cat > app/src/main/res/values/colors.xml << 'COLORS_EOF'
+          cat > app/src/main/res/values/colors.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <color name="keyboard_bg">#FF1B1B2F</color>
@@ -242,12 +237,12 @@ jobs:
               <color name="accent">#FFE43F5A</color>
               <color name="divider">#33FFFFFF</color>
           </resources>
-          COLORS_EOF
+          EOF
 
           # ==============================================
           # res/values/dimens.xml
           # ==============================================
-          cat > app/src/main/res/values/dimens.xml << 'DIMENS_EOF'
+          cat > app/src/main/res/values/dimens.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <dimen name="keyboard_height">280dp</dimen>
@@ -255,29 +250,28 @@ jobs:
               <dimen name="emoji_padding">6dp</dimen>
               <dimen name="emoji_grid_spacing">4dp</dimen>
           </resources>
-          DIMENS_EOF
+          EOF
 
           # ==============================================
-          # Иконка клавиатуры (drawable XML)
+          # res/drawable/ic_keyboard.xml
           # ==============================================
-          cat > app/src/main/res/drawable/ic_keyboard.xml << 'ICON_EOF'
+          cat > app/src/main/res/drawable/ic_keyboard.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="48dp"
               android:height="48dp"
               android:viewportWidth="24"
-              android:viewportHeight="24"
-              android:tint="#FFFFFF">
+              android:viewportHeight="24">
               <path
                   android:fillColor="#FFE43F5A"
                   android:pathData="M20,5H4C2.9,5 2,5.9 2,7v10c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V7C22,5.9 21.1,5 20,5zM11,8h2v2h-2V8zM11,11h2v2h-2V11zM8,8h2v2H8V8zM8,11h2v2H8V11zM7,13H5v-2h2V13zM7,10H5V8h2V10zM16,17H8v-2h8V17zM16,13h-2v-2h2V13zM16,10h-2V8h2V10zM19,13h-2v-2h2V13zM19,10h-2V8h2V10z"/>
           </vector>
-          ICON_EOF
+          EOF
 
           # ==============================================
-          # Фон кнопки (drawable XML)
+          # res/drawable/emoji_item_bg.xml
           # ==============================================
-          cat > app/src/main/res/drawable/emoji_item_bg.xml << 'EMOJI_BG_EOF'
+          cat > app/src/main/res/drawable/emoji_item_bg.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ripple xmlns:android="http://schemas.android.com/apk/res/android"
               android:color="@color/key_bg_pressed">
@@ -288,12 +282,12 @@ jobs:
                   </shape>
               </item>
           </ripple>
-          EMOJI_BG_EOF
+          EOF
 
           # ==============================================
-          # layout/keyboard_view.xml
+          # res/layout/keyboard_view.xml
           # ==============================================
-          cat > app/src/main/res/layout/keyboard_view.xml << 'KEYBOARD_LAYOUT_EOF'
+          cat > app/src/main/res/layout/keyboard_view.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout
               xmlns:android="http://schemas.android.com/apk/res/android"
@@ -302,7 +296,6 @@ jobs:
               android:orientation="vertical"
               android:background="@color/keyboard_bg">
 
-              <!-- Панель с кнопками управления -->
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="40dp"
@@ -336,7 +329,6 @@ jobs:
                   android:layout_height="1dp"
                   android:background="@color/divider" />
 
-              <!-- Сетка эмодзи -->
               <androidx.recyclerview.widget.RecyclerView
                   android:id="@+id/rvEmoji"
                   android:layout_width="match_parent"
@@ -344,12 +336,12 @@ jobs:
                   android:padding="@dimen/emoji_grid_spacing"
                   android:clipToPadding="false" />
           </LinearLayout>
-          KEYBOARD_LAYOUT_EOF
+          EOF
 
           # ==============================================
-          # layout/item_emoji.xml
+          # res/layout/item_emoji.xml
           # ==============================================
-          cat > app/src/main/res/layout/item_emoji.xml << 'ITEM_LAYOUT_EOF'
+          cat > app/src/main/res/layout/item_emoji.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout
               xmlns:android="http://schemas.android.com/apk/res/android"
@@ -357,7 +349,6 @@ jobs:
               android:layout_height="wrap_content"
               android:background="@drawable/emoji_item_bg"
               android:padding="@dimen/emoji_padding">
-
               <ImageView
                   android:id="@+id/ivEmoji"
                   android:layout_width="@dimen/emoji_size"
@@ -366,12 +357,12 @@ jobs:
                   android:scaleType="fitCenter"
                   android:contentDescription="emoji" />
           </FrameLayout>
-          ITEM_LAYOUT_EOF
+          EOF
 
           # ==============================================
-          # layout/activity_settings.xml
+          # res/layout/activity_settings.xml
           # ==============================================
-          cat > app/src/main/res/layout/activity_settings.xml << 'SETTINGS_LAYOUT_EOF'
+          cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout
               xmlns:android="http://schemas.android.com/apk/res/android"
@@ -414,7 +405,6 @@ jobs:
                   android:textSize="14sp"
                   android:textColor="#99FFFFFF"
                   android:gravity="center"
-                  android:lineSpacingExtra="4dp"
                   android:layout_marginBottom="24dp" />
 
               <Button
@@ -424,7 +414,6 @@ jobs:
                   android:text="Open Keyboard Settings"
                   android:backgroundTint="@color/accent" />
 
-              <!-- Превью эмодзи -->
               <androidx.recyclerview.widget.RecyclerView
                   android:id="@+id/rvPreview"
                   android:layout_width="match_parent"
@@ -433,19 +422,17 @@ jobs:
                   android:layout_marginTop="24dp"
                   android:padding="4dp" />
           </LinearLayout>
-          SETTINGS_LAYOUT_EOF
+          EOF
 
-          echo "✅ Все layout-файлы созданы"
+          echo "✅ Все ресурсы и конфиги созданы"
 
-      # ===== ШАГ 4: Создание Kotlin-кода приложения =====
+      # ===== ШАГ 4: Создание Kotlin-кода =====
       - name: Create Kotlin source code
         run: |
-          JAVA_DIR="app/src/main/java/com/custom/keyboard"
+          K="app/src/main/java/com/custom/keyboard"
 
-          # ==============================================
-          # EmojiItem.kt — модель данных
-          # ==============================================
-          cat > "$JAVA_DIR/EmojiItem.kt" << 'KOTLIN_EOF'
+          # EmojiItem.kt
+          cat > "$K/EmojiItem.kt" << 'EOF'
           package com.custom.keyboard
 
           import android.graphics.Bitmap
@@ -455,16 +442,13 @@ jobs:
               val fileName: String,
               val bitmap: Bitmap?
           )
-          KOTLIN_EOF
+          EOF
 
-          # ==============================================
-          # EmojiLoader.kt — загрузка из assets
-          # ==============================================
-          cat > "$JAVA_DIR/EmojiLoader.kt" << 'KOTLIN_EOF'
+          # EmojiLoader.kt
+          cat > "$K/EmojiLoader.kt" << 'EOF'
           package com.custom.keyboard
 
           import android.content.Context
-          import android.graphics.Bitmap
           import android.graphics.BitmapFactory
           import android.util.Log
           import org.json.JSONArray
@@ -472,71 +456,45 @@ jobs:
           object EmojiLoader {
               private const val TAG = "EmojiLoader"
               private const val EMOJI_DIR = "emoji"
-              private const val CATALOG_FILE = "emoji/catalog.json"
+              private const val CATALOG = "emoji/catalog.json"
 
-              fun loadAllEmoji(context: Context): List<EmojiItem> {
-                  val emojis = mutableListOf<EmojiItem>()
-
+              fun loadAll(context: Context): List<EmojiItem> {
+                  val list = mutableListOf<EmojiItem>()
                   try {
-                      val json = context.assets
-                          .open(CATALOG_FILE)
-                          .bufferedReader()
-                          .use { it.readText() }
-
-                      val array = JSONArray(json)
-
-                      for (i in 0 until array.length()) {
-                          val obj = array.getJSONObject(i)
+                      val json = context.assets.open(CATALOG).bufferedReader().use { it.readText() }
+                      val arr = JSONArray(json)
+                      for (i in 0 until arr.length()) {
+                          val obj = arr.getJSONObject(i)
                           val name = obj.getString("name")
                           val file = obj.getString("file")
-
-                          val bitmap = try {
-                              context.assets.open("$EMOJI_DIR/$file").use { stream ->
-                                  BitmapFactory.decodeStream(stream)
-                              }
-                          } catch (e: Exception) {
-                              Log.w(TAG, "Failed to load emoji: $file", e)
-                              null
-                          }
-
-                          if (bitmap != null) {
-                              emojis.add(EmojiItem(name, file, bitmap))
-                          }
+                          val bmp = try {
+                              context.assets.open("$EMOJI_DIR/$file").use { BitmapFactory.decodeStream(it) }
+                          } catch (e: Exception) { null }
+                          if (bmp != null) list.add(EmojiItem(name, file, bmp))
                       }
                   } catch (e: Exception) {
-                      Log.e(TAG, "Failed to load emoji catalog", e)
-
-                      // Fallback: читаем директорию напрямую
+                      Log.e(TAG, "Catalog failed, scanning directory", e)
                       try {
                           val files = context.assets.list(EMOJI_DIR) ?: emptyArray()
-                          for (file in files) {
-                              if (file == "catalog.json") continue
-                              val bitmap = try {
-                                  context.assets.open("$EMOJI_DIR/$file").use { stream ->
-                                      BitmapFactory.decodeStream(stream)
-                                  }
+                          for (f in files) {
+                              if (f == "catalog.json") continue
+                              val bmp = try {
+                                  context.assets.open("$EMOJI_DIR/$f").use { BitmapFactory.decodeStream(it) }
                               } catch (ex: Exception) { null }
-
-                              if (bitmap != null) {
-                                  val name = file.substringBeforeLast(".")
-                                  emojis.add(EmojiItem(name, file, bitmap))
-                              }
+                              if (bmp != null) list.add(EmojiItem(f.substringBeforeLast("."), f, bmp))
                           }
                       } catch (ex: Exception) {
-                          Log.e(TAG, "Failed to list emoji directory", ex)
+                          Log.e(TAG, "Directory scan failed", ex)
                       }
                   }
-
-                  Log.i(TAG, "Loaded ${emojis.size} custom emoji")
-                  return emojis
+                  Log.i(TAG, "Loaded ${list.size} emoji")
+                  return list
               }
           }
-          KOTLIN_EOF
+          EOF
 
-          # ==============================================
-          # EmojiAdapter.kt — RecyclerView адаптер
-          # ==============================================
-          cat > "$JAVA_DIR/EmojiAdapter.kt" << 'KOTLIN_EOF'
+          # EmojiAdapter.kt
+          cat > "$K/EmojiAdapter.kt" << 'EOF'
           package com.custom.keyboard
 
           import android.view.LayoutInflater
@@ -546,118 +504,71 @@ jobs:
           import androidx.recyclerview.widget.RecyclerView
 
           class EmojiAdapter(
-              private val emojis: List<EmojiItem>,
+              private val items: List<EmojiItem>,
               private val onClick: (EmojiItem) -> Unit
-          ) : RecyclerView.Adapter<EmojiAdapter.ViewHolder>() {
+          ) : RecyclerView.Adapter<EmojiAdapter.VH>() {
 
-              class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-                  val imageView: ImageView = view.findViewById(R.id.ivEmoji)
+              class VH(v: View) : RecyclerView.ViewHolder(v) {
+                  val iv: ImageView = v.findViewById(R.id.ivEmoji)
               }
 
-              override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-                  val view = LayoutInflater.from(parent.context)
-                      .inflate(R.layout.item_emoji, parent, false)
-                  return ViewHolder(view)
+              override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
+                  VH(LayoutInflater.from(parent.context).inflate(R.layout.item_emoji, parent, false))
+
+              override fun onBindViewHolder(holder: VH, position: Int) {
+                  val e = items[position]
+                  holder.iv.setImageBitmap(e.bitmap)
+                  holder.iv.contentDescription = e.name
+                  holder.itemView.setOnClickListener { onClick(e) }
               }
 
-              override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-                  val emoji = emojis[position]
-                  holder.imageView.setImageBitmap(emoji.bitmap)
-                  holder.imageView.contentDescription = emoji.name
-                  holder.itemView.setOnClickListener { onClick(emoji) }
-              }
-
-              override fun getItemCount(): Int = emojis.size
+              override fun getItemCount() = items.size
           }
-          KOTLIN_EOF
+          EOF
 
-          # ==============================================
-          # EmojiKeyboardService.kt — сервис клавиатуры
-          # ==============================================
-          cat > "$JAVA_DIR/EmojiKeyboardService.kt" << 'KOTLIN_EOF'
+          # EmojiKeyboardService.kt
+          cat > "$K/EmojiKeyboardService.kt" << 'EOF'
           package com.custom.keyboard
 
-          import android.content.ClipData
-          import android.content.ClipboardManager
-          import android.content.Context
           import android.inputmethodservice.InputMethodService
           import android.view.View
           import android.widget.ImageButton
           import android.widget.TextView
           import android.widget.Toast
-          import androidx.core.content.FileProvider
           import androidx.recyclerview.widget.GridLayoutManager
           import androidx.recyclerview.widget.RecyclerView
-          import java.io.File
-          import java.io.FileOutputStream
 
           class EmojiKeyboardService : InputMethodService() {
 
-              private lateinit var emojis: List<EmojiItem>
-
               override fun onCreateInputView(): View {
                   val view = layoutInflater.inflate(R.layout.keyboard_view, null)
+                  val emojis = EmojiLoader.loadAll(this)
+                  val rv = view.findViewById<RecyclerView>(R.id.rvEmoji)
+                  val tv = view.findViewById<TextView>(R.id.tvEmojiCount)
+                  val btn = view.findViewById<ImageButton>(R.id.btnBackspace)
 
-                  emojis = EmojiLoader.loadAllEmoji(this)
-
-                  val recyclerView = view.findViewById<RecyclerView>(R.id.rvEmoji)
-                  val tvCount = view.findViewById<TextView>(R.id.tvEmojiCount)
-                  val btnBackspace = view.findViewById<ImageButton>(R.id.btnBackspace)
-
-                  tvCount.text = getString(R.string.emoji_count_label, emojis.size)
-
-                  recyclerView.layoutManager = GridLayoutManager(this, 6)
-                  recyclerView.adapter = EmojiAdapter(emojis) { emoji ->
-                      sendEmojiToInput(emoji)
+                  tv.text = getString(R.string.emoji_count_label, emojis.size)
+                  rv.layoutManager = GridLayoutManager(this, 6)
+                  rv.adapter = EmojiAdapter(emojis) { emoji ->
+                      currentInputConnection?.commitText(":${emoji.name}:", 1)
+                      Toast.makeText(this, emoji.name, Toast.LENGTH_SHORT).show()
                   }
 
-                  btnBackspace.setOnClickListener {
+                  btn.setOnClickListener {
                       currentInputConnection?.deleteSurroundingText(1, 0)
                   }
-
-                  btnBackspace.setOnLongClickListener {
+                  btn.setOnLongClickListener {
                       currentInputConnection?.deleteSurroundingText(50, 0)
                       true
                   }
 
                   return view
               }
-
-              private fun sendEmojiToInput(emoji: EmojiItem) {
-                  try {
-                      // Сохраняем bitmap во временный файл
-                      val file = File(cacheDir, "shared_emoji_${emoji.fileName}")
-                      FileOutputStream(file).use { out ->
-                          emoji.bitmap?.compress(
-                              if (emoji.fileName.endsWith(".png"))
-                                  android.graphics.Bitmap.CompressFormat.PNG
-                              else
-                                  android.graphics.Bitmap.CompressFormat.WEBP,
-                              100, out
-                          )
-                      }
-
-                      // Копируем имя эмодзи в буфер обмена как fallback
-                      val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                      val clip = ClipData.newPlainText("emoji", ":${emoji.name}:")
-                      clipboard.setPrimaryClip(clip)
-
-                      // Коммитим текст
-                      currentInputConnection?.commitText(":${emoji.name}:", 1)
-
-                      Toast.makeText(this, emoji.name, Toast.LENGTH_SHORT).show()
-                  } catch (e: Exception) {
-                      // Простой fallback — отправляем имя как текст
-                      currentInputConnection?.commitText(":${emoji.name}:", 1)
-                  }
-              }
           }
-          KOTLIN_EOF
+          EOF
 
-          # ==============================================
-          # SettingsActivity.kt — главная активити
-          # ==============================================
-          cat > "$JAVA_DIR/SettingsActivity.kt" << 'KOTLIN_EOF'
+          # SettingsActivity.kt
+          cat > "$K/SettingsActivity.kt" << 'EOF'
           package com.custom.keyboard
 
           import android.content.Intent
@@ -665,251 +576,122 @@ jobs:
           import android.provider.Settings
           import android.widget.Button
           import android.widget.TextView
+          import android.widget.Toast
           import androidx.appcompat.app.AppCompatActivity
           import androidx.recyclerview.widget.GridLayoutManager
           import androidx.recyclerview.widget.RecyclerView
 
           class SettingsActivity : AppCompatActivity() {
-
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   setContentView(R.layout.activity_settings)
 
-                  val emojis = EmojiLoader.loadAllEmoji(this)
+                  val emojis = EmojiLoader.loadAll(this)
+                  val tv = findViewById<TextView>(R.id.tvEmojiInfo)
+                  val rv = findViewById<RecyclerView>(R.id.rvPreview)
+                  val btn = findViewById<Button>(R.id.btnOpenSettings)
 
-                  val tvInfo = findViewById<TextView>(R.id.tvEmojiInfo)
-                  val btnSettings = findViewById<Button>(R.id.btnOpenSettings)
-                  val rvPreview = findViewById<RecyclerView>(R.id.rvPreview)
+                  tv.text = if (emojis.isEmpty()) getString(R.string.no_emoji_found)
+                            else getString(R.string.emoji_count_label, emojis.size)
 
-                  if (emojis.isEmpty()) {
-                      tvInfo.text = getString(R.string.no_emoji_found)
-                  } else {
-                      tvInfo.text = getString(R.string.emoji_count_label, emojis.size)
+                  rv.layoutManager = GridLayoutManager(this, 5)
+                  rv.adapter = EmojiAdapter(emojis) {
+                      Toast.makeText(this, it.name, Toast.LENGTH_SHORT).show()
                   }
 
-                  rvPreview.layoutManager = GridLayoutManager(this, 5)
-                  rvPreview.adapter = EmojiAdapter(emojis) { emoji ->
-                      android.widget.Toast.makeText(
-                          this, emoji.name, android.widget.Toast.LENGTH_SHORT
-                      ).show()
-                  }
-
-                  btnSettings.setOnClickListener {
+                  btn.setOnClickListener {
                       startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
                   }
               }
           }
-          KOTLIN_EOF
+          EOF
 
           echo "✅ Все Kotlin-файлы созданы"
 
-      # ===== ШАГ 5: Копирование эмодзи из /emoji в assets =====
-      - name: Copy custom emoji to app resources
+      # ===== ШАГ 5: Копирование эмодзи =====
+      - name: Copy emoji to app resources
         run: |
-          echo "========================================="
-          echo "  Копирование кастомных эмодзи"
-          echo "========================================="
-
           EMOJI_SRC="emoji"
           DRAWABLE_DIR="app/src/main/res/drawable-nodpi"
           ASSETS_DIR="app/src/main/assets/emoji"
 
-          if [ ! -d "$EMOJI_SRC" ]; then
-            echo "⚠️ Папка emoji/ не найдена! Создаю placeholder..."
+          if [ ! -d "$EMOJI_SRC" ] || [ -z "$(ls -A $EMOJI_SRC 2>/dev/null)" ]; then
+            echo "⚠️ Папка emoji/ пуста или не найдена — создаю placeholder"
             mkdir -p "$EMOJI_SRC"
-
-            # Создаём простой placeholder PNG (1x1 пиксель)
             python3 -c "
-          import base64, os
-          # Минимальный 32x32 PNG — смайлик-заглушка
+          import base64
           png = base64.b64decode(
-              'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA'
-              'GklEQVRYR+3BAQEAAACCIP+vbkhAAQAAAO8GECAAAUEfMYAAAAAASUVORK5CYII='
+              'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0'
+              'AAAAGklEQVRYR+3BAQEAAACCIP+vbkhAAQAAAO8GECAAAUEfMYAAAAAASUVORK5CYII='
           )
-          for name in ['smile', 'heart', 'star']:
-              with open(f'emoji/{name}.png', 'wb') as f:
-                  f.write(png)
-          print('Created placeholder emoji')
+          for n in ['smile','heart','star']:
+              with open(f'emoji/{n}.png','wb') as f: f.write(png)
+          print('Created 3 placeholder emoji')
           "
           fi
 
-          echo "Файлы в emoji/:"
-          ls -la "$EMOJI_SRC/" || true
-
-          # Счётчик
           count=0
-
           for file in "$EMOJI_SRC"/*; do
             [ ! -f "$file" ] && continue
-
             filename=$(basename "$file")
-            extension="${filename##*.}"
+            ext="${filename##*.}"
 
-            # Только изображения
-            case "$extension" in
+            case "$ext" in
               png|jpg|jpeg|webp|gif) ;;
-              *) echo "  Пропуск: $filename (не изображение)"; continue ;;
+              *) echo "  Skip: $filename"; continue ;;
             esac
 
-            # Нормализация имени для Android ресурсов
-            safe_name=$(echo "${filename%.*}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//' | sed 's/_$//')
+            safe=$(echo "${filename%.*}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//')
+            [[ ! "$safe" =~ ^[a-z] ]] && safe="emoji_${safe}"
 
-            # Имя должно начинаться с буквы
-            if [[ ! "$safe_name" =~ ^[a-z] ]]; then
-              safe_name="emoji_${safe_name}"
-            fi
-
-            # Копируем в drawable
-            cp "$file" "$DRAWABLE_DIR/${safe_name}.${extension}"
-
-            # Копируем в assets
-            cp "$file" "$ASSETS_DIR/${safe_name}.${extension}"
-
-            echo "  ✅ $filename -> ${safe_name}.${extension}"
+            cp "$file" "$DRAWABLE_DIR/${safe}.${ext}"
+            cp "$file" "$ASSETS_DIR/${safe}.${ext}"
+            echo "  ✅ $filename -> ${safe}.${ext}"
             count=$((count + 1))
           done
 
-          echo ""
-          echo "Всего скопировано: $count эмодзи"
+          echo "Скопировано: $count эмодзи"
 
-      # ===== ШАГ 6: Генерация каталога эмодзи =====
-      - name: Generate emoji catalog JSON
+      # ===== ШАГ 6: Генерация каталога =====
+      - name: Generate emoji catalog
         run: |
           CATALOG="app/src/main/assets/emoji/catalog.json"
-          ASSETS_DIR="app/src/main/assets/emoji"
-
           echo "[" > "$CATALOG"
-
           first=true
-          for file in "$ASSETS_DIR"/*; do
+
+          for file in app/src/main/assets/emoji/*; do
             [ ! -f "$file" ] && continue
-            filename=$(basename "$file")
-            [ "$filename" = "catalog.json" ] && continue
+            fn=$(basename "$file")
+            [ "$fn" = "catalog.json" ] && continue
 
-            name="${filename%.*}"
-
-            if [ "$first" = true ]; then
-              first=false
-            else
-              echo "," >> "$CATALOG"
-            fi
-
-            printf '  {"name": "%s", "file": "%s"}' "$name" "$filename" >> "$CATALOG"
+            [ "$first" = true ] && first=false || echo "," >> "$CATALOG"
+            printf '  {"name":"%s","file":"%s"}' "${fn%.*}" "$fn" >> "$CATALOG"
           done
 
           echo "" >> "$CATALOG"
           echo "]" >> "$CATALOG"
-
-          echo "=== catalog.json ==="
+          echo "catalog.json:"
           cat "$CATALOG"
 
       # ===== ШАГ 7: Установка Gradle Wrapper =====
-      - name: Setup Gradle Wrapper
+      - name: Install Gradle Wrapper
         run: |
-          # Скачиваем gradle-wrapper.jar
-          mkdir -p gradle/wrapper
+          # Скачиваем Gradle и генерируем wrapper
+          GRADLE_VER="8.5"
 
-          GRADLE_VERSION="8.5"
-          WRAPPER_URL="https://raw.githubusercontent.com/gradle/gradle/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar"
-
-          # Генерируем gradlew скрипт
-          cat > gradlew << 'GRADLEW_EOF'
-          #!/bin/sh
-
-          ##############################################################################
-          # Gradle start up script for POSIX generated by Gradle.
-          ##############################################################################
-
-          # Attempt to set APP_HOME
-          # Resolve links: $0 may be a link
-          app_path=$0
-          APP_HOME=$( cd "${APP_HOME:-./}" > /dev/null && pwd -P ) || exit
-
-          # Use the maximum available, or set MAX_FD != -1 to use that value.
-          MAX_FD=maximum
-
-          warn () { echo "$*"; } >&2
-          die () { echo "$*"; exit 1; } >&2
-
-          # OS specific support
-          cygwin=false
-          msys=false
-          darwin=false
-          nonstop=false
-          case "$( uname )" in
-            CYGWIN* )         cygwin=true  ;;
-            Darwin* )         darwin=true  ;;
-            MSYS* | MINGW* )  msys=true    ;;
-            NonStop*)         nonstop=true ;;
-          esac
-
-          CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
-
-          # Determine the Java command to use to start the JVM.
-          if [ -n "$JAVA_HOME" ] ; then
-              if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
-                  JAVACMD=$JAVA_HOME/jre/sh/java
-              else
-                  JAVACMD=$JAVA_HOME/bin/java
-              fi
-              if [ ! -x "$JAVACMD" ] ; then
-                  die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME"
-              fi
-          else
-              JAVACMD=java
-              if ! command -v java >/dev/null 2>&1 ; then
-                  die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH."
-              fi
-          fi
-
-          # Escape application args
-          save () {
-              for i do printf %s\\n "$i" | sed "s/'/'\\\\''/g;1s/^/'/;\$s/\$/' \\\\/" ; done
-              echo " "
-          }
-          APP_ARGS=`save "$@"`
-
-          # Collect all arguments for the java command, stracks://gradle.org
-          eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS \
-              "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" \
-              -classpath "\"$CLASSPATH\"" \
-              org.gradle.wrapper.GradleWrapperMain \
-              "$APP_ARGS"
-
-          exec "$JAVACMD" "$@"
-          GRADLEW_EOF
-
-          chmod +x gradlew
-
-          # Скачиваем wrapper jar
-          curl -sL -o gradle/wrapper/gradle-wrapper.jar \
-            "https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar" || \
-          curl -sL -o gradle/wrapper/gradle-wrapper.jar \
-            "https://services.gradle.org/distributions/gradle-8.5-bin.zip" && \
-          echo "Downloading wrapper via gradle init..." && \
-          # Альтернативный способ — используем системный gradle
-          true
-
-          # Если jar не скачался, используем gradle init
-          if [ ! -s gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "Downloading Gradle distribution directly..."
-            # Устанавливаем gradle и генерируем wrapper
-            sudo apt-get update -qq && sudo apt-get install -qq -y gradle 2>/dev/null || true
-
-            if command -v gradle &>/dev/null; then
-              gradle wrapper --gradle-version 8.5
-            else
-              # Скачиваем gradle вручную
-              curl -sL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o /tmp/gradle.zip
-              unzip -q /tmp/gradle.zip -d /tmp/
-              /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5
-            fi
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Скачиваю Gradle ${GRADLE_VER}..."
+            curl -sL "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -o /tmp/gradle.zip
+            unzip -q /tmp/gradle.zip -d /tmp/
+            /tmp/gradle-${GRADLE_VER}/bin/gradle wrapper --gradle-version ${GRADLE_VER} --no-daemon
+            rm -rf /tmp/gradle* 
           fi
 
           chmod +x gradlew
-          echo "✅ Gradle wrapper готов"
+          echo "✅ gradlew готов"
+          ./gradlew --version
 
-      # ===== ШАГ 8: Кэширование Gradle =====
+      # ===== ШАГ 8: Кэширование Gradle (ПОСЛЕ создания файлов) =====
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -921,61 +703,34 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # ===== ШАГ 9: Проверка структуры перед сборкой =====
+      # ===== ШАГ 9: Проверка структуры =====
       - name: Verify project structure
         run: |
-          echo "========================================="
-          echo "  Проверка структуры проекта"
-          echo "========================================="
-
+          echo "📁 Project tree:"
+          find . -not -path './.git/*' -not -name 'gradle-wrapper.jar' | sort | head -80
           echo ""
-          echo "📁 Дерево проекта:"
-          find . -not -path './.git/*' -not -path './gradle/wrapper/gradle-wrapper.jar' | head -80
-
-          echo ""
-          echo "📄 settings.gradle.kts:"
-          cat settings.gradle.kts
-
-          echo ""
-          echo "📄 app/build.gradle.kts:"
-          cat app/build.gradle.kts
-
-          echo ""
-          echo "📄 AndroidManifest.xml:"
-          cat app/src/main/AndroidManifest.xml
-
-          echo ""
-          echo "📁 Kotlin-файлы:"
-          find . -name "*.kt" -type f
-
-          echo ""
-          echo "📁 Assets/emoji:"
+          echo "📁 assets/emoji/:"
           ls -la app/src/main/assets/emoji/
-
           echo ""
-          echo "📁 Drawable-nodpi:"
+          echo "📁 drawable-nodpi/:"
           ls -la app/src/main/res/drawable-nodpi/ | head -20
 
       # ===== ШАГ 10: Сборка Debug APK =====
       - name: Build Debug APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tail -100
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC"
 
       # ===== ШАГ 11: Сборка Release APK =====
       - name: Build Release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tail -50
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        continue-on-error: true
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC"
-        continue-on-error: true
 
-      # ===== ШАГ 12: Поиск APK файлов =====
-      - name: List built APK files
-        run: |
-          echo "=== Все APK файлы ==="
-          find . -name "*.apk" -type f -exec ls -lh {} \;
+      # ===== ШАГ 12: Список APK =====
+      - name: List APK files
+        run: find . -name "*.apk" -type f -exec ls -lh {} \;
 
       # ===== ШАГ 13: Загрузка Debug APK =====
       - name: Upload Debug APK
@@ -989,7 +744,6 @@ jobs:
       # ===== ШАГ 14: Загрузка Release APK =====
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: CustomEmojiKeyboard-release
           path: app/build/outputs/apk/release/*.apk
@@ -1000,40 +754,24 @@ jobs:
       - name: Build Summary
         if: always()
         run: |
-          echo "## 📱 Custom Emoji Keyboard — Build Report" >> $GITHUB_STEP_SUMMARY
+          echo "## 📱 Build Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Подсчёт эмодзи
           emoji_count=$(ls app/src/main/assets/emoji/ 2>/dev/null | grep -v catalog.json | wc -l)
-          echo "### 😀 Custom emoji included: ${emoji_count}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### 📦 APK Artifacts:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 😀 Emoji included: ${emoji_count}" >> $GITHUB_STEP_SUMMARY
 
           if ls app/build/outputs/apk/debug/*.apk 1>/dev/null 2>&1; then
             for apk in app/build/outputs/apk/debug/*.apk; do
               size=$(du -h "$apk" | cut -f1)
-              echo "- ✅ **Debug**: \`$(basename $apk)\` — $size" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ **Debug**: \`$(basename $apk)\` ($size)" >> $GITHUB_STEP_SUMMARY
             done
           else
-            echo "- ❌ Debug APK not found" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ Debug APK failed" >> $GITHUB_STEP_SUMMARY
           fi
 
           if ls app/build/outputs/apk/release/*.apk 1>/dev/null 2>&1; then
             for apk in app/build/outputs/apk/release/*.apk; do
               size=$(du -h "$apk" | cut -f1)
-              echo "- ✅ **Release**: \`$(basename $apk)\` — $size" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ **Release**: \`$(basename $apk)\` ($size)" >> $GITHUB_STEP_SUMMARY
             done
-          else
-            echo "- ⚠️ Release APK not built" >> $GITHUB_STEP_SUMMARY
           fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### 📋 Emoji list:" >> $GITHUB_STEP_SUMMARY
-          for file in app/src/main/assets/emoji/*; do
-            [ "$(basename "$file")" = "catalog.json" ] && continue
-            [ ! -f "$file" ] && continue
-            echo "- 🖼️ $(basename "$file")" >> $GITHUB_STEP_SUMMARY
-          done
