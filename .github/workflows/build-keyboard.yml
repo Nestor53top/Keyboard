@@ -1,12 +1,10 @@
-name: Build Android Keyboard APK
+name: Build Full Custom Keyboard
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '* * * * *'
   workflow_dispatch:
 
 jobs:
@@ -27,57 +25,32 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Validate emoji files
+      - name: Validate emoji
         run: |
           EMOJI_DIR="emoji"
-          ERRORS=0
+          [ ! -d "$EMOJI_DIR" ] && echo "❌ emoji/ not found" && exit 1
           VALID=0
-
-          if [ ! -d "$EMOJI_DIR" ]; then
-            echo "❌ Папка emoji/ не найдена!"
-            exit 1
-          fi
-
-          for file in "$EMOJI_DIR"/*; do
-            [ ! -f "$file" ] && continue
-            filename=$(basename "$file")
-            ext="${filename##*.}"
-            ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
-
-            if [ "$ext_lower" != "png" ]; then
-              echo "❌ ОТКЛОНЁН: $filename (не PNG)"
-              ERRORS=$((ERRORS + 1))
-              rm "$file"
-              continue
-            fi
-
-            MAGIC=$(xxd -l 4 -p "$file" 2>/dev/null)
-            if [ "$MAGIC" != "89504e47" ]; then
-              echo "❌ ОТКЛОНЁН: $filename (повреждён)"
-              ERRORS=$((ERRORS + 1))
-              rm "$file"
-              continue
-            fi
-
-            echo "  ✅ $filename"
-            VALID=$((VALID + 1))
+          for f in "$EMOJI_DIR"/*; do
+            [ ! -f "$f" ] && continue
+            ext=$(echo "${f##*.}" | tr '[:upper:]' '[:lower:]')
+            [ "$ext" != "png" ] && rm "$f" && continue
+            M=$(xxd -l 4 -p "$f" 2>/dev/null)
+            [ "$M" != "89504e47" ] && rm "$f" && continue
+            VALID=$((VALID+1))
           done
-
-          echo "Валидных: $VALID | Отклонённых: $ERRORS"
+          echo "Valid PNG: $VALID"
           [ "$VALID" -eq 0 ] && exit 1 || true
 
-      - name: Create Android project
+      - name: Create full Android project
         run: |
           mkdir -p app/src/main/java/com/custom/keyboard
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/drawable-nodpi
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/{drawable,drawable-nodpi,layout,values,values-night,xml,raw,mipmap-hdpi,mipmap-xhdpi,mipmap-xxhdpi,anim}
           mkdir -p app/src/main/assets/emoji
           mkdir -p gradle/wrapper
 
-          # ── settings.gradle.kts ──
+          # ══════════════════════════════════════
+          # settings.gradle.kts
+          # ══════════════════════════════════════
           cat > settings.gradle.kts << 'EOF'
           pluginManagement {
               repositories {
@@ -93,11 +66,13 @@ jobs:
                   mavenCentral()
               }
           }
-          rootProject.name = "CustomEmojiKeyboard"
+          rootProject.name = "NestorKeyboard"
           include(":app")
           EOF
 
-          # ── build.gradle.kts (root) ──
+          # ══════════════════════════════════════
+          # build.gradle.kts (root)
+          # ══════════════════════════════════════
           cat > build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application") version "8.2.0" apply false
@@ -105,7 +80,9 @@ jobs:
           }
           EOF
 
-          # ── gradle.properties ──
+          # ══════════════════════════════════════
+          # gradle.properties
+          # ══════════════════════════════════════
           cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8
           org.gradle.parallel=true
@@ -114,7 +91,6 @@ jobs:
           android.nonTransitiveRClass=true
           EOF
 
-          # ── gradle-wrapper.properties ──
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -125,17 +101,17 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-          # ── app/build.gradle.kts ──
+          # ══════════════════════════════════════
+          # app/build.gradle.kts
+          # ══════════════════════════════════════
           cat > app/build.gradle.kts << 'EOF'
           plugins {
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
           }
-
           android {
               namespace = "com.custom.keyboard"
               compileSdk = 34
-
               defaultConfig {
                   applicationId = "com.custom.keyboard"
                   minSdk = 24
@@ -143,47 +119,49 @@ jobs:
                   versionCode = 1
                   versionName = "1.0.0"
               }
-
               buildTypes {
                   debug { isMinifyEnabled = false }
                   release { isMinifyEnabled = false }
               }
-
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
               }
-
               kotlinOptions { jvmTarget = "17" }
               aaptOptions { noCompress += listOf("png") }
+              buildFeatures { viewBinding = true }
           }
-
           dependencies {
               implementation("androidx.core:core-ktx:1.12.0")
               implementation("androidx.appcompat:appcompat:1.6.1")
               implementation("com.google.android.material:material:1.11.0")
               implementation("androidx.recyclerview:recyclerview:1.3.2")
               implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+              implementation("androidx.viewpager2:viewpager2:1.0.0")
+              implementation("androidx.preference:preference-ktx:1.2.1")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
           }
           EOF
 
-          # ══════════════════════════════════════════════
-          # AndroidManifest.xml — С FileProvider ДЛЯ КАРТИНОК
-          # ══════════════════════════════════════════════
+          # ══════════════════════════════════════
+          # AndroidManifest.xml
+          # ══════════════════════════════════════
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.VIBRATE" />
               <application
                   android:allowBackup="true"
                   android:icon="@drawable/ic_keyboard"
                   android:label="@string/app_name"
                   android:supportsRtl="true"
-                  android:theme="@style/Theme.MaterialComponents.Light.NoActionBar">
+                  android:theme="@style/AppTheme">
 
                   <activity
                       android:name=".SettingsActivity"
                       android:exported="true"
-                      android:label="@string/app_name">
+                      android:label="@string/app_name"
+                      android:theme="@style/AppTheme">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -191,7 +169,7 @@ jobs:
                   </activity>
 
                   <service
-                      android:name=".EmojiKeyboardService"
+                      android:name=".NestorKeyboardService"
                       android:exported="true"
                       android:label="@string/keyboard_name"
                       android:permission="android.permission.BIND_INPUT_METHOD">
@@ -203,7 +181,6 @@ jobs:
                           android:resource="@xml/method" />
                   </service>
 
-                  <!-- FileProvider для отправки картинок в другие приложения -->
                   <provider
                       android:name="androidx.core.content.FileProvider"
                       android:authorities="${applicationId}.fileprovider"
@@ -217,357 +194,778 @@ jobs:
           </manifest>
           EOF
 
-          # ── res/xml/method.xml ──
+          # ══════════════════════════════════════
+          # XML configs
+          # ══════════════════════════════════════
           cat > app/src/main/res/xml/method.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <input-method
-              xmlns:android="http://schemas.android.com/apk/res/android"
+          <input-method xmlns:android="http://schemas.android.com/apk/res/android"
               android:settingsActivity="com.custom.keyboard.SettingsActivity"
-              android:isDefault="false">
-              <subtype
-                  android:imeSubtypeMode="keyboard"
-                  android:label="Emoji Keyboard"
-                  android:imeSubtypeLocale="en_US" />
+              android:isDefault="false"
+              android:supportsSwitchingToNextInputMethod="true">
+              <subtype android:imeSubtypeMode="keyboard"
+                  android:label="English" android:imeSubtypeLocale="en_US" />
+              <subtype android:imeSubtypeMode="keyboard"
+                  android:label="Русский" android:imeSubtypeLocale="ru_RU" />
           </input-method>
           EOF
 
-          # ══════════════════════════════════════════════
-          # res/xml/file_paths.xml — ПУТИ ДЛЯ FileProvider
-          # ══════════════════════════════════════════════
           cat > app/src/main/res/xml/file_paths.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <paths>
-              <cache-path name="emoji_images" path="emoji/" />
-          </paths>
+          <paths><cache-path name="emoji_images" path="emoji/" /></paths>
           EOF
 
-          # ── res/values/strings.xml ──
+          # ══════════════════════════════════════
+          # values/strings.xml
+          # ══════════════════════════════════════
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="app_name">Custom Emoji Keyboard</string>
-              <string name="keyboard_name">Emoji Keyboard</string>
-              <string name="enable_hint">Enable in Settings → System → Languages → On-screen keyboard</string>
-              <string name="emoji_count">Custom emoji: %d</string>
+              <string name="app_name">Nestor Keyboard</string>
+              <string name="keyboard_name">Nestor Keyboard</string>
+              <string name="emoji_count">Emoji: %d</string>
               <string name="no_emoji">No emoji found</string>
+              <string name="enable_hint">Enable in Settings → System → Keyboard</string>
+              <string name="tab_qwerty">ABC</string>
+              <string name="tab_emoji">😀</string>
+              <string name="tab_numbers">123</string>
+              <string name="tab_symbols">#+=</string>
+              <string name="copied">Copied to clipboard</string>
           </resources>
           EOF
 
-          # ── res/values/colors.xml ──
+          # ══════════════════════════════════════
+          # values/colors.xml
+          # ══════════════════════════════════════
           cat > app/src/main/res/values/colors.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <color name="keyboard_bg">#FF1B1B2F</color>
-              <color name="key_bg">#FF162447</color>
-              <color name="key_pressed">#FF1F4068</color>
+              <color name="kb_bg">#FF1A1A2E</color>
+              <color name="kb_bg_gradient_end">#FF16213E</color>
+              <color name="key_bg">#FF0F3460</color>
+              <color name="key_bg_pressed">#FF533483</color>
+              <color name="key_bg_special">#FF1A1A40</color>
+              <color name="key_bg_space">#FF0F3460</color>
+              <color name="key_bg_enter">#FF533483</color>
               <color name="key_text">#FFFFFFFF</color>
-              <color name="accent">#FFE43F5A</color>
-              <color name="divider">#33FFFFFF</color>
+              <color name="key_text_secondary">#CCFFFFFF</color>
+              <color name="key_text_special">#FFE94560</color>
+              <color name="accent">#FFE94560</color>
+              <color name="accent_light">#FFFF6B6B</color>
+              <color name="divider">#22FFFFFF</color>
+              <color name="preview_bg">#FF533483</color>
+              <color name="tab_active">#FFE94560</color>
+              <color name="tab_inactive">#66FFFFFF</color>
+              <color name="popup_bg">#FF1A1A2E</color>
+              <color name="suggestion_bg">#FF16213E</color>
+              <color name="emoji_category_bg">#FF0F3460</color>
+              <color name="ripple_color">#33E94560</color>
           </resources>
           EOF
 
-          # ── res/values/dimens.xml ──
+          # ══════════════════════════════════════
+          # values-night/colors.xml
+          # ══════════════════════════════════════
+          cat > app/src/main/res/values-night/colors.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="kb_bg">#FF0D0D1A</color>
+              <color name="key_bg">#FF1A1A2E</color>
+              <color name="key_bg_pressed">#FF3D1F5C</color>
+          </resources>
+          EOF
+
+          # ══════════════════════════════════════
+          # values/dimens.xml
+          # ══════════════════════════════════════
           cat > app/src/main/res/values/dimens.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <dimen name="keyboard_height">280dp</dimen>
-              <dimen name="emoji_size">40dp</dimen>
-              <dimen name="emoji_padding">6dp</dimen>
-              <dimen name="grid_spacing">4dp</dimen>
+              <dimen name="keyboard_height">260dp</dimen>
+              <dimen name="key_height">48dp</dimen>
+              <dimen name="key_margin">3dp</dimen>
+              <dimen name="key_radius">10dp</dimen>
+              <dimen name="key_text_size">20sp</dimen>
+              <dimen name="key_text_secondary_size">11sp</dimen>
+              <dimen name="space_height">42dp</dimen>
+              <dimen name="tab_height">38dp</dimen>
+              <dimen name="emoji_size">36dp</dimen>
+              <dimen name="emoji_padding">5dp</dimen>
+              <dimen name="preview_text_size">28sp</dimen>
+              <dimen name="suggestion_height">36dp</dimen>
           </resources>
           EOF
 
-          # ── res/drawable/ic_keyboard.xml ──
+          # ══════════════════════════════════════
+          # values/styles.xml
+          # ══════════════════════════════════════
+          cat > app/src/main/res/values/styles.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="colorPrimary">@color/accent</item>
+                  <item name="colorPrimaryVariant">@color/key_bg</item>
+                  <item name="colorOnPrimary">@color/key_text</item>
+                  <item name="colorSecondary">@color/accent_light</item>
+                  <item name="android:windowBackground">@color/kb_bg</item>
+                  <item name="android:statusBarColor">@color/kb_bg</item>
+                  <item name="android:navigationBarColor">@color/kb_bg</item>
+              </style>
+          </resources>
+          EOF
+
+          # ══════════════════════════════════════
+          # DRAWABLES
+          # ══════════════════════════════════════
+
+          # Иконка приложения
           cat > app/src/main/res/drawable/ic_keyboard.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="48dp"
-              android:height="48dp"
-              android:viewportWidth="24"
-              android:viewportHeight="24">
-              <path
-                  android:fillColor="#FFE43F5A"
-                  android:pathData="M20,5H4C2.9,5 2,5.9 2,7v10c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V7C22,5.9 21.1,5 20,5zM11,8h2v2h-2V8zM11,11h2v2h-2V11zM8,8h2v2H8V8zM8,11h2v2H8V11zM7,13H5v-2h2V13zM7,10H5V8h2V10zM16,17H8v-2h8V17zM16,13h-2v-2h2V13zM16,10h-2V8h2V10zM19,13h-2v-2h2V13zM19,10h-2V8h2V10z"/>
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#FF1A1A2E"
+                  android:pathData="M0,0h108v108H0z"/>
+              <path android:fillColor="#FFE94560"
+                  android:pathData="M24,35h60c3.3,0 6,2.7 6,6v26c0,3.3 -2.7,6 -6,6H24c-3.3,0 -6,-2.7 -6,-6V41c0,-3.3 2.7,-6 6,-6zM36,44h6v6h-6v-6zM36,53h6v6h-6v-6zM45,44h6v6h-6v-6zM45,53h6v6h-6v-6zM57,44h6v6h-6v-6zM57,53h6v6h-6v-6zM66,44h6v6h-6v-6zM27,44h6v6h-6v-6zM27,53h6v6h-6v-6zM66,53h6v6h-6v-6zM39,62h30v5H39v-5z"/>
           </vector>
           EOF
 
-          # ── res/drawable/emoji_item_bg.xml ──
-          cat > app/src/main/res/drawable/emoji_item_bg.xml << 'EOF'
+          # Фон кнопки
+          cat > app/src/main/res/drawable/key_bg.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-              android:color="@color/key_pressed">
-              <item>
-                  <shape android:shape="rectangle">
-                      <corners android:radius="8dp" />
-                      <solid android:color="@color/key_bg" />
-                  </shape>
-              </item>
+              android:color="@color/ripple_color">
+              <item><shape android:shape="rectangle">
+                  <corners android:radius="@dimen/key_radius"/>
+                  <solid android:color="@color/key_bg"/>
+              </shape></item>
           </ripple>
           EOF
 
-          # ── res/layout/keyboard_view.xml ──
-          cat > app/src/main/res/layout/keyboard_view.xml << 'EOF'
+          # Фон спецкнопки
+          cat > app/src/main/res/drawable/key_bg_special.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout
-              xmlns:android="http://schemas.android.com/apk/res/android"
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="@color/ripple_color">
+              <item><shape android:shape="rectangle">
+                  <corners android:radius="@dimen/key_radius"/>
+                  <solid android:color="@color/key_bg_special"/>
+              </shape></item>
+          </ripple>
+          EOF
+
+          # Фон Enter
+          cat > app/src/main/res/drawable/key_bg_enter.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="@color/ripple_color">
+              <item><shape android:shape="rectangle">
+                  <corners android:radius="@dimen/key_radius"/>
+                  <solid android:color="@color/key_bg_enter"/>
+              </shape></item>
+          </ripple>
+          EOF
+
+          # Фон пробела
+          cat > app/src/main/res/drawable/key_bg_space.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="@color/ripple_color">
+              <item><shape android:shape="rectangle">
+                  <corners android:radius="20dp"/>
+                  <solid android:color="@color/key_bg_space"/>
+                  <stroke android:width="1dp" android:color="@color/divider"/>
+              </shape></item>
+          </ripple>
+          EOF
+
+          # Фон эмодзи
+          cat > app/src/main/res/drawable/emoji_item_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="@color/ripple_color">
+              <item><shape android:shape="rectangle">
+                  <corners android:radius="8dp"/>
+                  <solid android:color="@android:color/transparent"/>
+              </shape></item>
+          </ripple>
+          EOF
+
+          # Фон таба
+          cat > app/src/main/res/drawable/tab_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+              android:color="@color/ripple_color">
+              <item><shape android:shape="rectangle">
+                  <solid android:color="@android:color/transparent"/>
+              </shape></item>
+          </ripple>
+          EOF
+
+          # Фон активного таба
+          cat > app/src/main/res/drawable/tab_bg_active.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="@android:color/transparent"/>
+              <padding android:bottom="2dp"/>
+          </shape>
+          EOF
+
+          # Индикатор таба
+          cat > app/src/main/res/drawable/tab_indicator.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <size android:height="3dp"/>
+              <corners android:radius="2dp"/>
+              <solid android:color="@color/accent"/>
+          </shape>
+          EOF
+
+          # Preview фон
+          cat > app/src/main/res/drawable/key_preview_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <corners android:radius="12dp"/>
+              <solid android:color="@color/preview_bg"/>
+              <stroke android:width="1dp" android:color="@color/accent"/>
+          </shape>
+          EOF
+
+          # Иконки
+          cat > app/src/main/res/drawable/ic_backspace.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/key_text"
+                  android:pathData="M22,3H7c-0.69,0-1.23,0.35-1.59,0.88L0,12l5.41,8.11C5.77,20.64 6.31,21 7,21h15c1.1,0 2,-0.9 2,-2V5C24,3.9 23.1,3 22,3zM19,15.59L17.59,17L14,13.41L10.41,17L9,15.59L12.59,12L9,8.41L10.41,7L14,10.59L17.59,7L19,8.41L15.41,12L19,15.59z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_shift.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/key_text"
+                  android:pathData="M7.41,15.41L12,10.83l4.59,4.58L18,14l-6,-6 -6,6z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_shift_locked.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/accent"
+                  android:pathData="M7.41,15.41L12,10.83l4.59,4.58L18,14l-6,-6 -6,6z"/>
+              <path android:fillColor="@color/accent"
+                  android:pathData="M6,19h12v2H6z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_enter.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/key_text"
+                  android:pathData="M19,7v4H5.83l3.58,-3.59L8,6l-6,6 6,6 1.41,-1.41L5.83,13H21V7z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_language.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/key_text"
+                  android:pathData="M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM18.92,8h-2.95c-0.32,-1.25 -0.78,-2.45 -1.38,-3.56 1.84,0.63 3.37,1.91 4.33,3.56zM12,4.04c0.83,1.2 1.48,2.53 1.91,3.96h-3.82c0.43,-1.43 1.08,-2.76 1.91,-3.96zM4.26,14C4.1,13.36 4,12.69 4,12s0.1,-1.36 0.26,-2h3.38c-0.08,0.66 -0.14,1.32 -0.14,2 0,0.68 0.06,1.34 0.14,2H4.26zM5.08,16h2.95c0.32,1.25 0.78,2.45 1.38,3.56 -1.84,-0.63 -3.37,-1.9 -4.33,-3.56zM8.03,8H5.08c0.96,-1.66 2.49,-2.93 4.33,-3.56C8.81,5.55 8.35,6.75 8.03,8zM12,19.96c-0.83,-1.2 -1.48,-2.53 -1.91,-3.96h3.82c-0.43,1.43 -1.08,2.76 -1.91,3.96zM14.34,14H9.66c-0.09,-0.66 -0.16,-1.32 -0.16,-2 0,-0.68 0.07,-1.35 0.16,-2h4.68c0.09,0.65 0.16,1.32 0.16,2 0,0.68 -0.07,1.34 -0.16,2zM14.59,19.56c0.6,-1.11 1.06,-2.31 1.38,-3.56h2.95c-0.96,1.65 -2.49,2.93 -4.33,3.56zM16.36,14c0.08,-0.66 0.14,-1.32 0.14,-2 0,-0.68 -0.06,-1.34 -0.14,-2h3.38c0.16,0.64 0.26,1.31 0.26,2s-0.1,1.36 -0.26,2h-3.38z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_emoji.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/key_text"
+                  android:pathData="M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zM15.5,11c0.83,0 1.5,-0.67 1.5,-1.5S16.33,8 15.5,8 14,8.67 14,9.5s0.67,1.5 1.5,1.5zM8.5,11c0.83,0 1.5,-0.67 1.5,-1.5S9.33,8 8.5,8 7,8.67 7,9.5 7.67,11 8.5,11zM12,17.5c2.33,0 4.31,-1.46 5.11,-3.5H6.89c0.8,2.04 2.78,3.5 5.11,3.5z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_settings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="@color/key_text"
+                  android:pathData="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"/>
+          </vector>
+          EOF
+
+          # Анимация
+          cat > app/src/main/res/anim/key_press.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <set xmlns:android="http://schemas.android.com/apk/res/android"
+              android:interpolator="@android:anim/decelerate_interpolator">
+              <scale android:fromXScale="1.0" android:toXScale="0.92"
+                  android:fromYScale="1.0" android:toYScale="0.92"
+                  android:pivotX="50%" android:pivotY="50%"
+                  android:duration="50"/>
+              <scale android:fromXScale="0.92" android:toXScale="1.0"
+                  android:fromYScale="0.92" android:toYScale="1.0"
+                  android:pivotX="50%" android:pivotY="50%"
+                  android:startOffset="50" android:duration="80"/>
+          </set>
+          EOF
+
+          echo "✅ All resources created"
+
+      - name: Create layouts
+        run: |
+          # ══════════════════════════════════════
+          # ГЛАВНЫЙ LAYOUT КЛАВИАТУРЫ
+          # ══════════════════════════════════════
+          cat > app/src/main/res/layout/keyboard_main.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
-              android:layout_height="@dimen/keyboard_height"
+              android:layout_height="wrap_content"
               android:orientation="vertical"
-              android:background="@color/keyboard_bg">
+              android:background="@color/kb_bg">
 
-              <LinearLayout
+              <!-- Панель табов -->
+              <LinearLayout android:id="@+id/tabBar"
                   android:layout_width="match_parent"
-                  android:layout_height="40dp"
+                  android:layout_height="@dimen/tab_height"
                   android:orientation="horizontal"
-                  android:gravity="center_vertical"
-                  android:paddingStart="8dp"
-                  android:paddingEnd="8dp"
-                  android:background="@color/key_bg">
+                  android:background="@color/key_bg_special"
+                  android:gravity="center_vertical">
 
-                  <TextView
-                      android:id="@+id/tvCount"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:textColor="@color/key_text"
-                      android:textSize="12sp" />
+                  <TextView android:id="@+id/tabQwerty"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1" android:gravity="center"
+                      android:text="@string/tab_qwerty"
+                      android:textColor="@color/tab_active"
+                      android:textSize="14sp" android:textStyle="bold"
+                      android:background="@drawable/tab_bg"/>
 
-                  <ImageButton
-                      android:id="@+id/btnBackspace"
-                      android:layout_width="48dp"
-                      android:layout_height="36dp"
-                      android:background="@drawable/emoji_item_bg"
-                      android:src="@android:drawable/ic_input_delete"
-                      android:contentDescription="Backspace"
-                      android:scaleType="centerInside" />
+                  <TextView android:id="@+id/tabEmoji"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1" android:gravity="center"
+                      android:text="@string/tab_emoji"
+                      android:textSize="18sp"
+                      android:textColor="@color/tab_inactive"
+                      android:background="@drawable/tab_bg"/>
+
+                  <TextView android:id="@+id/tabNumbers"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1" android:gravity="center"
+                      android:text="@string/tab_numbers"
+                      android:textColor="@color/tab_inactive"
+                      android:textSize="14sp"
+                      android:background="@drawable/tab_bg"/>
+
+                  <TextView android:id="@+id/tabSymbols"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1" android:gravity="center"
+                      android:text="@string/tab_symbols"
+                      android:textColor="@color/tab_inactive"
+                      android:textSize="14sp"
+                      android:background="@drawable/tab_bg"/>
               </LinearLayout>
 
-              <View
-                  android:layout_width="match_parent"
+              <View android:layout_width="match_parent"
                   android:layout_height="1dp"
-                  android:background="@color/divider" />
+                  android:background="@color/divider"/>
+
+              <!-- Контейнер для страниц -->
+              <FrameLayout android:id="@+id/keyboardContainer"
+                  android:layout_width="match_parent"
+                  android:layout_height="@dimen/keyboard_height"/>
+          </LinearLayout>
+          EOF
+
+          # ══════════════════════════════════════
+          # QWERTY LAYOUT
+          # ══════════════════════════════════════
+          cat > app/src/main/res/layout/keyboard_qwerty.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="2dp">
+
+              <!-- Row 1 -->
+              <LinearLayout android:id="@+id/row1"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:orientation="horizontal"/>
+
+              <!-- Row 2 -->
+              <LinearLayout android:id="@+id/row2"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:orientation="horizontal"
+                  android:paddingStart="16dp"
+                  android:paddingEnd="16dp"/>
+
+              <!-- Row 3: Shift + keys + Backspace -->
+              <LinearLayout android:id="@+id/row3container"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:orientation="horizontal">
+
+                  <ImageButton android:id="@+id/btnShift"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1.5"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_special"
+                      android:src="@drawable/ic_shift"
+                      android:scaleType="centerInside"
+                      android:contentDescription="Shift"/>
+
+                  <LinearLayout android:id="@+id/row3"
+                      android:layout_width="0dp"
+                      android:layout_height="match_parent"
+                      android:layout_weight="7"
+                      android:orientation="horizontal"/>
+
+                  <ImageButton android:id="@+id/btnBackspace"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1.5"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_special"
+                      android:src="@drawable/ic_backspace"
+                      android:scaleType="centerInside"
+                      android:contentDescription="Backspace"/>
+              </LinearLayout>
+
+              <!-- Row 4: Special keys -->
+              <LinearLayout android:id="@+id/row4"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:orientation="horizontal"
+                  android:gravity="center_vertical">
+
+                  <TextView android:id="@+id/btnSwitchNum"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1.2"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_special"
+                      android:gravity="center"
+                      android:text="123"
+                      android:textColor="@color/key_text"
+                      android:textSize="15sp"/>
+
+                  <ImageButton android:id="@+id/btnLang"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_special"
+                      android:src="@drawable/ic_language"
+                      android:scaleType="centerInside"
+                      android:contentDescription="Language"/>
+
+                  <ImageButton android:id="@+id/btnEmojiToggle"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_special"
+                      android:src="@drawable/ic_emoji"
+                      android:scaleType="centerInside"
+                      android:contentDescription="Emoji"/>
+
+                  <TextView android:id="@+id/btnSpace"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="4.5"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_space"
+                      android:gravity="center"
+                      android:text="Nestor"
+                      android:textColor="@color/key_text_secondary"
+                      android:textSize="13sp"/>
+
+                  <TextView android:id="@+id/btnDot"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg"
+                      android:gravity="center"
+                      android:text="."
+                      android:textColor="@color/key_text"
+                      android:textSize="@dimen/key_text_size"/>
+
+                  <ImageButton android:id="@+id/btnEnter"
+                      android:layout_width="0dp" android:layout_height="match_parent"
+                      android:layout_weight="1.3"
+                      android:layout_margin="@dimen/key_margin"
+                      android:background="@drawable/key_bg_enter"
+                      android:src="@drawable/ic_enter"
+                      android:scaleType="centerInside"
+                      android:contentDescription="Enter"/>
+              </LinearLayout>
+          </LinearLayout>
+          EOF
+
+          # ══════════════════════════════════════
+          # EMOJI LAYOUT
+          # ══════════════════════════════════════
+          cat > app/src/main/res/layout/keyboard_emoji.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical">
+
+              <LinearLayout android:id="@+id/emojiModeBar"
+                  android:layout_width="match_parent"
+                  android:layout_height="32dp"
+                  android:orientation="horizontal"
+                  android:background="@color/key_bg_special"
+                  android:gravity="center_vertical"
+                  android:paddingStart="8dp" android:paddingEnd="8dp">
+
+                  <TextView android:id="@+id/tvEmojiMode"
+                      android:layout_width="0dp" android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:textColor="@color/key_text_secondary"
+                      android:textSize="11sp"/>
+
+                  <ImageButton android:id="@+id/btnEmojiBackspace"
+                      android:layout_width="40dp" android:layout_height="28dp"
+                      android:background="@drawable/key_bg_special"
+                      android:src="@drawable/ic_backspace"
+                      android:scaleType="centerInside"
+                      android:contentDescription="Backspace"/>
+              </LinearLayout>
 
               <androidx.recyclerview.widget.RecyclerView
                   android:id="@+id/rvEmoji"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
-                  android:padding="@dimen/grid_spacing"
-                  android:clipToPadding="false" />
+                  android:padding="4dp"
+                  android:clipToPadding="false"/>
           </LinearLayout>
           EOF
 
-          # ── res/layout/item_emoji.xml ──
+          # ══════════════════════════════════════
+          # NUMBERS LAYOUT
+          # ══════════════════════════════════════
+          cat > app/src/main/res/layout/keyboard_numbers.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:padding="2dp">
+              <LinearLayout android:id="@+id/numRow1"
+                  android:layout_width="match_parent" android:layout_height="0dp"
+                  android:layout_weight="1" android:orientation="horizontal"/>
+              <LinearLayout android:id="@+id/numRow2"
+                  android:layout_width="match_parent" android:layout_height="0dp"
+                  android:layout_weight="1" android:orientation="horizontal"/>
+              <LinearLayout android:id="@+id/numRow3"
+                  android:layout_width="match_parent" android:layout_height="0dp"
+                  android:layout_weight="1" android:orientation="horizontal"/>
+              <LinearLayout android:id="@+id/numRow4"
+                  android:layout_width="match_parent" android:layout_height="0dp"
+                  android:layout_weight="1" android:orientation="horizontal"/>
+          </LinearLayout>
+          EOF
+
+          # Item emoji
           cat > app/src/main/res/layout/item_emoji.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout
-              xmlns:android="http://schemas.android.com/apk/res/android"
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="wrap_content"
               android:background="@drawable/emoji_item_bg"
               android:padding="@dimen/emoji_padding">
-              <ImageView
-                  android:id="@+id/ivEmoji"
+              <ImageView android:id="@+id/ivEmoji"
                   android:layout_width="@dimen/emoji_size"
                   android:layout_height="@dimen/emoji_size"
                   android:layout_gravity="center"
                   android:scaleType="fitCenter"
-                  android:contentDescription="emoji" />
+                  android:contentDescription="emoji"/>
           </FrameLayout>
           EOF
 
-          # ── res/layout/activity_settings.xml ──
+          # Settings activity
           cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout
-              xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical"
-              android:gravity="center"
-              android:padding="32dp"
-              android:background="@color/keyboard_bg">
-
-              <ImageView
-                  android:layout_width="80dp"
-                  android:layout_height="80dp"
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent"
+              android:orientation="vertical" android:gravity="center"
+              android:padding="32dp" android:background="@color/kb_bg">
+              <ImageView android:layout_width="96dp" android:layout_height="96dp"
                   android:src="@drawable/ic_keyboard"
-                  android:layout_marginBottom="24dp"
-                  android:contentDescription="icon" />
-
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="@string/app_name"
-                  android:textSize="24sp"
-                  android:textColor="@color/key_text"
-                  android:textStyle="bold"
-                  android:layout_marginBottom="16dp" />
-
-              <TextView
-                  android:id="@+id/tvInfo"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:textSize="16sp"
-                  android:textColor="@color/key_text"
-                  android:layout_marginBottom="24dp"
-                  android:gravity="center" />
-
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="@string/enable_hint"
-                  android:textSize="14sp"
-                  android:textColor="#99FFFFFF"
-                  android:gravity="center"
-                  android:layout_marginBottom="24dp" />
-
-              <Button
-                  android:id="@+id/btnSettings"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="Open Keyboard Settings"
-                  android:backgroundTint="@color/accent" />
-
-              <androidx.recyclerview.widget.RecyclerView
-                  android:id="@+id/rvPreview"
-                  android:layout_width="match_parent"
-                  android:layout_height="0dp"
-                  android:layout_weight="1"
-                  android:layout_marginTop="24dp" />
+                  android:layout_marginBottom="24dp" android:contentDescription="icon"/>
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="@string/app_name" android:textSize="28sp"
+                  android:textColor="@color/key_text" android:textStyle="bold"
+                  android:layout_marginBottom="8dp"/>
+              <TextView android:id="@+id/tvInfo"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:textSize="16sp" android:textColor="@color/key_text_secondary"
+                  android:gravity="center" android:layout_marginBottom="24dp"/>
+              <Button android:id="@+id/btnSettings"
+                  android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:text="Open Keyboard Settings" android:backgroundTint="@color/accent"/>
+              <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvPreview"
+                  android:layout_width="match_parent" android:layout_height="0dp"
+                  android:layout_weight="1" android:layout_marginTop="24dp"/>
           </LinearLayout>
           EOF
 
-          echo "✅ Ресурсы созданы"
+          echo "✅ All layouts created"
 
-      # ══════════════════════════════════════════════════════
-      # ШАГ 5: KOTLIN КОД — ГЛАВНОЕ ИСПРАВЛЕНИЕ
-      # ══════════════════════════════════════════════════════
-      - name: Create Kotlin source code
+      - name: Create Kotlin code
         run: |
           K="app/src/main/java/com/custom/keyboard"
 
-          # ── EmojiItem.kt ──
+          # ══════════════════════════════════════
+          # EmojiItem.kt
+          # ══════════════════════════════════════
           cat > "$K/EmojiItem.kt" << 'EOF'
           package com.custom.keyboard
-
           import android.graphics.Bitmap
-
-          data class EmojiItem(
-              val name: String,
-              val fileName: String,
-              val bitmap: Bitmap?
-          )
+          data class EmojiItem(val name: String, val fileName: String, val bitmap: Bitmap?)
           EOF
 
-          # ── EmojiLoader.kt ──
+          # ══════════════════════════════════════
+          # EmojiLoader.kt
+          # ══════════════════════════════════════
           cat > "$K/EmojiLoader.kt" << 'EOF'
           package com.custom.keyboard
-
           import android.content.Context
           import android.graphics.BitmapFactory
           import android.util.Log
           import org.json.JSONArray
 
           object EmojiLoader {
-              private const val TAG = "EmojiLoader"
-              private const val DIR = "emoji"
-              private const val CATALOG = "emoji/catalog.json"
-
               fun loadAll(ctx: Context): List<EmojiItem> {
                   val list = mutableListOf<EmojiItem>()
                   try {
-                      val json = ctx.assets.open(CATALOG)
-                          .bufferedReader().use { it.readText() }
+                      val json = ctx.assets.open("emoji/catalog.json").bufferedReader().use { it.readText() }
                       val arr = JSONArray(json)
                       for (i in 0 until arr.length()) {
-                          val obj = arr.getJSONObject(i)
-                          val name = obj.getString("name")
-                          val file = obj.getString("file")
+                          val o = arr.getJSONObject(i)
+                          val name = o.getString("name"); val file = o.getString("file")
                           if (!file.lowercase().endsWith(".png")) continue
-                          val bmp = try {
-                              ctx.assets.open("$DIR/$file").use {
-                                  BitmapFactory.decodeStream(it)
-                              }
-                          } catch (e: Exception) { null }
+                          val bmp = try { ctx.assets.open("emoji/$file").use { BitmapFactory.decodeStream(it) } }
+                          catch (e: Exception) { null }
                           if (bmp != null) list.add(EmojiItem(name, file, bmp))
                       }
                   } catch (e: Exception) {
-                      Log.e(TAG, "Catalog failed", e)
+                      Log.e("EmojiLoader", "Fallback scan", e)
                       try {
-                          val files = ctx.assets.list(DIR) ?: emptyArray()
-                          for (f in files.sorted()) {
-                              if (f == "catalog.json") continue
-                              if (!f.lowercase().endsWith(".png")) continue
-                              val bmp = try {
-                                  ctx.assets.open("$DIR/$f").use {
-                                      BitmapFactory.decodeStream(it)
-                                  }
-                              } catch (ex: Exception) { null }
-                              if (bmp != null) list.add(
-                                  EmojiItem(f.substringBeforeLast("."), f, bmp)
-                              )
+                          (ctx.assets.list("emoji") ?: emptyArray()).sorted().forEach { f ->
+                              if (f == "catalog.json" || !f.lowercase().endsWith(".png")) return@forEach
+                              val bmp = try { ctx.assets.open("emoji/$f").use { BitmapFactory.decodeStream(it) } }
+                              catch (ex: Exception) { null }
+                              if (bmp != null) list.add(EmojiItem(f.substringBeforeLast("."), f, bmp))
                           }
-                      } catch (ex: Exception) {
-                          Log.e(TAG, "Scan failed", ex)
-                      }
+                      } catch (ex: Exception) { Log.e("EmojiLoader", "Scan failed", ex) }
                   }
-                  Log.i(TAG, "Loaded ${list.size} emoji")
                   return list
               }
           }
           EOF
 
-          # ── EmojiAdapter.kt ──
+          # ══════════════════════════════════════
+          # EmojiAdapter.kt
+          # ══════════════════════════════════════
           cat > "$K/EmojiAdapter.kt" << 'EOF'
           package com.custom.keyboard
-
-          import android.view.LayoutInflater
-          import android.view.View
-          import android.view.ViewGroup
-          import android.widget.ImageView
-          import androidx.recyclerview.widget.RecyclerView
-
+          import android.view.LayoutInflater; import android.view.View; import android.view.ViewGroup
+          import android.widget.ImageView; import androidx.recyclerview.widget.RecyclerView
           class EmojiAdapter(
               private val items: List<EmojiItem>,
-              private val onClick: (EmojiItem) -> Unit
+              private val onClick: (EmojiItem) -> Unit,
+              private val onLongClick: (EmojiItem) -> Unit
           ) : RecyclerView.Adapter<EmojiAdapter.VH>() {
-
-              class VH(v: View) : RecyclerView.ViewHolder(v) {
-                  val iv: ImageView = v.findViewById(R.id.ivEmoji)
-              }
-
+              class VH(v: View) : RecyclerView.ViewHolder(v) { val iv: ImageView = v.findViewById(R.id.ivEmoji) }
               override fun onCreateViewHolder(p: ViewGroup, t: Int) =
-                  VH(LayoutInflater.from(p.context)
-                      .inflate(R.layout.item_emoji, p, false))
-
+                  VH(LayoutInflater.from(p.context).inflate(R.layout.item_emoji, p, false))
               override fun onBindViewHolder(h: VH, pos: Int) {
-                  val e = items[pos]
-                  h.iv.setImageBitmap(e.bitmap)
-                  h.iv.contentDescription = e.name
+                  val e = items[pos]; h.iv.setImageBitmap(e.bitmap); h.iv.contentDescription = e.name
                   h.itemView.setOnClickListener { onClick(e) }
+                  h.itemView.setOnLongClickListener { onLongClick(e); true }
               }
-
               override fun getItemCount() = items.size
           }
           EOF
 
-          # ══════════════════════════════════════════════
-          # EmojiKeyboardService.kt — ОТПРАВКА КАРТИНОК
-          # ══════════════════════════════════════════════
-          cat > "$K/EmojiKeyboardService.kt" << 'KOTLIN_EOF'
+          # ══════════════════════════════════════
+          # KeyboardLayoutManager.kt — раскладки
+          # ══════════════════════════════════════
+          cat > "$K/KeyboardLayoutManager.kt" << 'EOF'
           package com.custom.keyboard
 
+          object KeyboardLayoutManager {
+              enum class Lang { EN, RU }
+
+              val EN_ROW1 = listOf("q","w","e","r","t","y","u","i","o","p")
+              val EN_ROW2 = listOf("a","s","d","f","g","h","j","k","l")
+              val EN_ROW3 = listOf("z","x","c","v","b","n","m")
+
+              val RU_ROW1 = listOf("й","ц","у","к","е","н","г","ш","щ","з","х","ъ")
+              val RU_ROW2 = listOf("ф","ы","в","а","п","р","о","л","д","ж","э")
+              val RU_ROW3 = listOf("я","ч","с","м","и","т","ь","б","ю")
+
+              val NUM_ROW1 = listOf("1","2","3","4","5","6","7","8","9","0")
+              val NUM_ROW2 = listOf("@","#","$","%","&","-","+","(",")","!")
+              val NUM_ROW3 = listOf("*","\"","'",":",";",",","?")
+              val NUM_ROW4_LEFT = listOf("ABC")
+              val NUM_ROW4_RIGHT = listOf(".")
+
+              val SYM_ROW1 = listOf("~","`","|","·","√","π","÷","×","¶","∆")
+              val SYM_ROW2 = listOf("£","€","¥","¢","^","°","=","{","}","\\")
+              val SYM_ROW3 = listOf("©","®","™","✓","[","]","<",">")
+
+              fun getRows(lang: Lang): Triple<List<String>, List<String>, List<String>> {
+                  return when (lang) {
+                      Lang.EN -> Triple(EN_ROW1, EN_ROW2, EN_ROW3)
+                      Lang.RU -> Triple(RU_ROW1, RU_ROW2, RU_ROW3)
+                  }
+              }
+          }
+          EOF
+
+          # ══════════════════════════════════════
+          # NestorKeyboardService.kt — ПОЛНАЯ КЛАВИАТУРА
+          # ══════════════════════════════════════
+          cat > "$K/NestorKeyboardService.kt" << 'KOTLIN_EOF'
+          package com.custom.keyboard
+
+          import android.content.ClipData
           import android.content.ClipDescription
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.content.Intent
+          import android.content.SharedPreferences
           import android.graphics.Bitmap
           import android.inputmethodservice.InputMethodService
           import android.net.Uri
+          import android.os.*
           import android.util.Log
-          import android.view.View
+          import android.util.TypedValue
+          import android.view.*
+          import android.view.animation.AnimationUtils
           import android.view.inputmethod.EditorInfo
           import android.view.inputmethod.InputConnection
-          import android.widget.ImageButton
-          import android.widget.TextView
-          import android.widget.Toast
+          import android.widget.*
           import androidx.core.content.FileProvider
           import androidx.core.view.inputmethod.EditorInfoCompat
           import androidx.core.view.inputmethod.InputConnectionCompat
@@ -577,260 +975,514 @@ jobs:
           import java.io.File
           import java.io.FileOutputStream
 
-          class EmojiKeyboardService : InputMethodService() {
+          class NestorKeyboardService : InputMethodService() {
 
               companion object {
-                  private const val TAG = "EmojiKeyboard"
-                  private const val MIME_PNG = "image/png"
-                  private const val AUTHORITY_SUFFIX = ".fileprovider"
+                  private const val TAG = "NestorKB"
               }
 
-              private lateinit var emojis: List<EmojiItem>
+              private enum class Page { QWERTY, EMOJI, NUMBERS, SYMBOLS }
+              private enum class ShiftState { OFF, ON, LOCKED }
+
+              private var currentPage = Page.QWERTY
+              private var currentLang = KeyboardLayoutManager.Lang.EN
+              private var shiftState = ShiftState.OFF
+              private var emojis = listOf<EmojiItem>()
+              private lateinit var prefs: SharedPreferences
+              private var vibrator: Vibrator? = null
+
+              private lateinit var rootView: View
+              private lateinit var container: FrameLayout
+              private lateinit var tabQwerty: TextView
+              private lateinit var tabEmoji: TextView
+              private lateinit var tabNumbers: TextView
+              private lateinit var tabSymbols: TextView
+
+              // Backspace repeat
+              private val handler = Handler(Looper.getMainLooper())
+              private var isBackspacePressed = false
+              private val backspaceRepeat = object : Runnable {
+                  override fun run() {
+                      if (isBackspacePressed) {
+                          currentInputConnection?.deleteSurroundingText(1, 0)
+                          vibrate()
+                          handler.postDelayed(this, 50)
+                      }
+                  }
+              }
+
+              override fun onCreate() {
+                  super.onCreate()
+                  prefs = getSharedPreferences("nestor_kb", Context.MODE_PRIVATE)
+                  vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+              }
 
               override fun onCreateInputView(): View {
-                  val view = layoutInflater.inflate(R.layout.keyboard_view, null)
+                  rootView = layoutInflater.inflate(R.layout.keyboard_main, null)
+                  container = rootView.findViewById(R.id.keyboardContainer)
+                  tabQwerty = rootView.findViewById(R.id.tabQwerty)
+                  tabEmoji = rootView.findViewById(R.id.tabEmoji)
+                  tabNumbers = rootView.findViewById(R.id.tabNumbers)
+                  tabSymbols = rootView.findViewById(R.id.tabSymbols)
+
                   emojis = EmojiLoader.loadAll(this)
 
-                  view.findViewById<TextView>(R.id.tvCount).text =
-                      getString(R.string.emoji_count, emojis.size)
+                  tabQwerty.setOnClickListener { switchPage(Page.QWERTY) }
+                  tabEmoji.setOnClickListener { switchPage(Page.EMOJI) }
+                  tabNumbers.setOnClickListener { switchPage(Page.NUMBERS) }
+                  tabSymbols.setOnClickListener { switchPage(Page.SYMBOLS) }
 
-                  val rv = view.findViewById<RecyclerView>(R.id.rvEmoji)
-                  rv.layoutManager = GridLayoutManager(this, 6)
-                  rv.adapter = EmojiAdapter(emojis) { emoji ->
-                      sendEmoji(emoji)
-                  }
-
-                  view.findViewById<ImageButton>(R.id.btnBackspace).apply {
-                      setOnClickListener {
-                          currentInputConnection?.deleteSurroundingText(1, 0)
-                      }
-                      setOnLongClickListener {
-                          currentInputConnection?.deleteSurroundingText(50, 0)
-                          true
-                      }
-                  }
-
-                  return view
+                  switchPage(Page.QWERTY)
+                  return rootView
               }
 
+              // ═══════════════════════════════════
+              // PAGE SWITCHING
+              // ═══════════════════════════════════
+              private fun switchPage(page: Page) {
+                  currentPage = page
+                  container.removeAllViews()
+                  updateTabs()
+                  when (page) {
+                      Page.QWERTY -> showQwerty()
+                      Page.EMOJI -> showEmoji()
+                      Page.NUMBERS -> showNumbers()
+                      Page.SYMBOLS -> showSymbols()
+                  }
+              }
+
+              private fun updateTabs() {
+                  val active = resources.getColor(R.color.tab_active, null)
+                  val inactive = resources.getColor(R.color.tab_inactive, null)
+                  tabQwerty.setTextColor(if (currentPage == Page.QWERTY) active else inactive)
+                  tabEmoji.setTextColor(if (currentPage == Page.EMOJI) active else inactive)
+                  tabNumbers.setTextColor(if (currentPage == Page.NUMBERS) active else inactive)
+                  tabSymbols.setTextColor(if (currentPage == Page.SYMBOLS) active else inactive)
+              }
+
+              // ═══════════════════════════════════
+              // QWERTY PAGE
+              // ═══════════════════════════════════
+              private fun showQwerty() {
+                  val view = layoutInflater.inflate(R.layout.keyboard_qwerty, container, false)
+                  container.addView(view)
+
+                  val (r1, r2, r3) = KeyboardLayoutManager.getRows(currentLang)
+                  val row1 = view.findViewById<LinearLayout>(R.id.row1)
+                  val row2 = view.findViewById<LinearLayout>(R.id.row2)
+                  val row3 = view.findViewById<LinearLayout>(R.id.row3)
+
+                  populateRow(row1, r1)
+                  populateRow(row2, r2)
+                  populateRow(row3, r3)
+
+                  // Shift
+                  val btnShift = view.findViewById<ImageButton>(R.id.btnShift)
+                  updateShiftIcon(btnShift)
+                  btnShift.setOnClickListener {
+                      shiftState = when (shiftState) {
+                          ShiftState.OFF -> ShiftState.ON
+                          ShiftState.ON -> ShiftState.LOCKED
+                          ShiftState.LOCKED -> ShiftState.OFF
+                      }
+                      updateShiftIcon(btnShift)
+                      refreshQwertyKeys(row1, row2, row3)
+                      vibrate()
+                  }
+
+                  // Backspace с повтором
+                  val btnBack = view.findViewById<ImageButton>(R.id.btnBackspace)
+                  btnBack.setOnTouchListener { _, event ->
+                      when (event.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              isBackspacePressed = true
+                              currentInputConnection?.deleteSurroundingText(1, 0)
+                              vibrate()
+                              handler.postDelayed(backspaceRepeat, 400)
+                              true
+                          }
+                          MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                              isBackspacePressed = false
+                              handler.removeCallbacks(backspaceRepeat)
+                              true
+                          }
+                          else -> false
+                      }
+                  }
+
+                  // Bottom row
+                  view.findViewById<TextView>(R.id.btnSwitchNum).setOnClickListener {
+                      switchPage(Page.NUMBERS); vibrate()
+                  }
+                  view.findViewById<ImageButton>(R.id.btnLang).setOnClickListener {
+                      currentLang = if (currentLang == KeyboardLayoutManager.Lang.EN)
+                          KeyboardLayoutManager.Lang.RU else KeyboardLayoutManager.Lang.EN
+                      switchPage(Page.QWERTY); vibrate()
+                  }
+                  view.findViewById<ImageButton>(R.id.btnEmojiToggle).setOnClickListener {
+                      switchPage(Page.EMOJI); vibrate()
+                  }
+                  view.findViewById<TextView>(R.id.btnSpace).apply {
+                      text = if (currentLang == KeyboardLayoutManager.Lang.EN) "English" else "Русский"
+                      setOnClickListener { commitChar(" "); vibrate() }
+                      setOnLongClickListener {
+                          currentLang = if (currentLang == KeyboardLayoutManager.Lang.EN)
+                              KeyboardLayoutManager.Lang.RU else KeyboardLayoutManager.Lang.EN
+                          switchPage(Page.QWERTY); vibrate(); true
+                      }
+                  }
+                  view.findViewById<TextView>(R.id.btnDot).setOnClickListener {
+                      commitChar("."); vibrate()
+                  }
+                  view.findViewById<ImageButton>(R.id.btnEnter).setOnClickListener {
+                      val ic = currentInputConnection ?: return@setOnClickListener
+                      val ei = currentInputEditorInfo
+                      val action = ei?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
+                          ?: EditorInfo.IME_ACTION_UNSPECIFIED
+                      if (action == EditorInfo.IME_ACTION_NONE || action == EditorInfo.IME_ACTION_UNSPECIFIED) {
+                          ic.commitText("\n", 1)
+                      } else {
+                          ic.performEditorAction(action)
+                      }
+                      vibrate()
+                  }
+              }
+
+              private fun populateRow(row: LinearLayout, keys: List<String>) {
+                  row.removeAllViews()
+                  keys.forEach { key ->
+                      val btn = TextView(this).apply {
+                          text = applyShift(key)
+                          setTextColor(resources.getColor(R.color.key_text, null))
+                          setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                              resources.getDimension(R.dimen.key_text_size))
+                          gravity = Gravity.CENTER
+                          setBackgroundResource(R.drawable.key_bg)
+                          layoutParams = LinearLayout.LayoutParams(
+                              0, LinearLayout.LayoutParams.MATCH_PARENT, 1f
+                          ).apply {
+                              val m = resources.getDimensionPixelSize(R.dimen.key_margin)
+                              setMargins(m, m, m, m)
+                          }
+                          isClickable = true
+                          isFocusable = true
+                      }
+                      btn.setOnClickListener {
+                          commitChar(btn.text.toString())
+                          vibrate()
+                          animateKey(btn)
+                          if (shiftState == ShiftState.ON) {
+                              shiftState = ShiftState.OFF
+                              showQwerty()
+                          }
+                      }
+                      row.addView(btn)
+                  }
+              }
+
+              private fun refreshQwertyKeys(r1: LinearLayout, r2: LinearLayout, r3: LinearLayout) {
+                  refreshRow(r1); refreshRow(r2); refreshRow(r3)
+              }
+
+              private fun refreshRow(row: LinearLayout) {
+                  for (i in 0 until row.childCount) {
+                      val v = row.getChildAt(i)
+                      if (v is TextView) {
+                          v.text = applyShift(v.text.toString())
+                      }
+                  }
+              }
+
+              private fun applyShift(key: String): String {
+                  return if (shiftState != ShiftState.OFF) key.uppercase() else key.lowercase()
+              }
+
+              private fun updateShiftIcon(btn: ImageButton) {
+                  btn.setImageResource(when (shiftState) {
+                      ShiftState.OFF -> R.drawable.ic_shift
+                      ShiftState.ON -> R.drawable.ic_shift
+                      ShiftState.LOCKED -> R.drawable.ic_shift_locked
+                  })
+              }
+
+              // ═══════════════════════════════════
+              // NUMBERS PAGE
+              // ═══════════════════════════════════
+              private fun showNumbers() {
+                  val view = layoutInflater.inflate(R.layout.keyboard_numbers, container, false)
+                  container.addView(view)
+                  populateRow(view.findViewById(R.id.numRow1), KeyboardLayoutManager.NUM_ROW1)
+                  populateRow(view.findViewById(R.id.numRow2), KeyboardLayoutManager.NUM_ROW2)
+                  populateRow(view.findViewById(R.id.numRow3), KeyboardLayoutManager.NUM_ROW3)
+
+                  val row4 = view.findViewById<LinearLayout>(R.id.numRow4)
+                  // ABC button
+                  addSpecialKey(row4, "ABC", 1.5f) { switchPage(Page.QWERTY); vibrate() }
+                  // Symbols
+                  addSpecialKey(row4, "#+=", 1.5f) { switchPage(Page.SYMBOLS); vibrate() }
+                  // Space
+                  val spaceBtn = TextView(this).apply {
+                      text = " "; gravity = Gravity.CENTER
+                      setBackgroundResource(R.drawable.key_bg_space)
+                      layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 5f).apply {
+                          val m = resources.getDimensionPixelSize(R.dimen.key_margin); setMargins(m,m,m,m) }
+                      setOnClickListener { commitChar(" "); vibrate() }
+                  }
+                  row4.addView(spaceBtn)
+                  addSpecialKey(row4, ".", 1f) { commitChar("."); vibrate() }
+                  // Backspace
+                  val bs = ImageButton(this).apply {
+                      setImageResource(R.drawable.ic_backspace); scaleType = ImageView.ScaleType.CENTER_INSIDE
+                      setBackgroundResource(R.drawable.key_bg_special)
+                      layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.5f).apply {
+                          val m = resources.getDimensionPixelSize(R.dimen.key_margin); setMargins(m,m,m,m) }
+                  }
+                  bs.setOnTouchListener { _, event ->
+                      when (event.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              isBackspacePressed = true; currentInputConnection?.deleteSurroundingText(1,0)
+                              vibrate(); handler.postDelayed(backspaceRepeat, 400); true
+                          }
+                          MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                              isBackspacePressed = false; handler.removeCallbacks(backspaceRepeat); true
+                          }
+                          else -> false
+                      }
+                  }
+                  row4.addView(bs)
+              }
+
+              // ═══════════════════════════════════
+              // SYMBOLS PAGE
+              // ═══════════════════════════════════
+              private fun showSymbols() {
+                  val view = layoutInflater.inflate(R.layout.keyboard_numbers, container, false)
+                  container.addView(view)
+                  populateRow(view.findViewById(R.id.numRow1), KeyboardLayoutManager.SYM_ROW1)
+                  populateRow(view.findViewById(R.id.numRow2), KeyboardLayoutManager.SYM_ROW2)
+                  populateRow(view.findViewById(R.id.numRow3), KeyboardLayoutManager.SYM_ROW3)
+
+                  val row4 = view.findViewById<LinearLayout>(R.id.numRow4)
+                  addSpecialKey(row4, "ABC", 1.5f) { switchPage(Page.QWERTY); vibrate() }
+                  addSpecialKey(row4, "123", 1.5f) { switchPage(Page.NUMBERS); vibrate() }
+                  val sp = TextView(this).apply {
+                      text = " "; setBackgroundResource(R.drawable.key_bg_space)
+                      layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 5f).apply {
+                          val m = resources.getDimensionPixelSize(R.dimen.key_margin); setMargins(m,m,m,m) }
+                      setOnClickListener { commitChar(" "); vibrate() }
+                  }
+                  row4.addView(sp)
+                  addSpecialKey(row4, ".", 1f) { commitChar("."); vibrate() }
+                  val bs = ImageButton(this).apply {
+                      setImageResource(R.drawable.ic_backspace); scaleType = ImageView.ScaleType.CENTER_INSIDE
+                      setBackgroundResource(R.drawable.key_bg_special)
+                      layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.5f).apply {
+                          val m = resources.getDimensionPixelSize(R.dimen.key_margin); setMargins(m,m,m,m) }
+                  }
+                  bs.setOnTouchListener { _, event ->
+                      when (event.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              isBackspacePressed = true; currentInputConnection?.deleteSurroundingText(1,0)
+                              vibrate(); handler.postDelayed(backspaceRepeat, 400); true
+                          }
+                          MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                              isBackspacePressed = false; handler.removeCallbacks(backspaceRepeat); true
+                          }
+                          else -> false
+                      }
+                  }
+                  row4.addView(bs)
+              }
+
+              private fun addSpecialKey(row: LinearLayout, text: String, weight: Float, action: () -> Unit) {
+                  val btn = TextView(this).apply {
+                      this.text = text; gravity = Gravity.CENTER
+                      setTextColor(resources.getColor(R.color.key_text_special, null))
+                      textSize = 15f; setBackgroundResource(R.drawable.key_bg_special)
+                      layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight).apply {
+                          val m = resources.getDimensionPixelSize(R.dimen.key_margin); setMargins(m,m,m,m) }
+                      setOnClickListener { action() }
+                  }
+                  row.addView(btn)
+              }
+
+              // ═══════════════════════════════════
+              // EMOJI PAGE
+              // ═══════════════════════════════════
+              private fun showEmoji() {
+                  val view = layoutInflater.inflate(R.layout.keyboard_emoji, container, false)
+                  container.addView(view)
+
+                  val tvMode = view.findViewById<TextView>(R.id.tvEmojiMode)
+                  tvMode.text = "Sticker mode • ${emojis.size} emoji"
+
+                  val rv = view.findViewById<RecyclerView>(R.id.rvEmoji)
+                  rv.layoutManager = GridLayoutManager(this, 5)
+                  rv.adapter = EmojiAdapter(emojis,
+                      onClick = { sendEmoji(it) },
+                      onLongClick = { copyToClipboard(it) }
+                  )
+
+                  view.findViewById<ImageButton>(R.id.btnEmojiBackspace).apply {
+                      setOnTouchListener { _, event ->
+                          when (event.action) {
+                              MotionEvent.ACTION_DOWN -> {
+                                  isBackspacePressed = true; currentInputConnection?.deleteSurroundingText(1,0)
+                                  vibrate(); handler.postDelayed(backspaceRepeat, 400); true
+                              }
+                              MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                  isBackspacePressed = false; handler.removeCallbacks(backspaceRepeat); true
+                              }
+                              else -> false
+                          }
+                      }
+                  }
+              }
+
+              // ═══════════════════════════════════
+              // EMOJI SENDING
+              // ═══════════════════════════════════
               private fun sendEmoji(emoji: EmojiItem) {
                   val ic = currentInputConnection ?: return
                   val ei = currentInputEditorInfo ?: return
 
-                  // Проверяем поддерживает ли приложение приём картинок
                   val mimeTypes = EditorInfoCompat.getContentMimeTypes(ei)
                   val supportsImage = mimeTypes.any {
-                      ClipDescription.compareMimeTypes(it, MIME_PNG) ||
+                      ClipDescription.compareMimeTypes(it, "image/png") ||
                       ClipDescription.compareMimeTypes(it, "image/*")
                   }
 
                   if (supportsImage) {
-                      // ── ПУТЬ 1: Отправка как картинка (Telegram, WhatsApp и др.) ──
-                      val sent = commitEmojiImage(emoji, ic, ei)
-                      if (sent) {
-                          Log.i(TAG, "Sent image: ${emoji.name}")
-                          return
-                      }
+                      val sent = commitImage(emoji, ic, ei)
+                      if (sent) { vibrate(); return }
                   }
+                  copyToClipboard(emoji)
+              }
 
-                  // ── ПУТЬ 2: Копирование в буфер обмена как картинка ──
-                  val copied = copyImageToClipboard(emoji)
-                  if (copied) {
-                      Toast.makeText(
-                          this,
-                          "${emoji.name} скопирован — вставьте из буфера",
-                          Toast.LENGTH_SHORT
-                      ).show()
+              private fun commitImage(emoji: EmojiItem, ic: InputConnection, ei: EditorInfo): Boolean {
+                  return try {
+                      val file = getEmojiFile(emoji)
+                      val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      val desc = ClipDescription(emoji.name, arrayOf("image/png"))
+                      val info = InputContentInfoCompat(uri, desc, null)
+                      InputConnectionCompat.commitContent(ic, ei, info,
+                          InputConnectionCompat.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null)
+                  } catch (e: Exception) { Log.e(TAG, "commitImage fail", e); false }
+              }
+
+              private fun copyToClipboard(emoji: EmojiItem) {
+                  try {
+                      val file = getEmojiFile(emoji)
+                      val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      grantUriPermission("*", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                      val clip = ClipData.newUri(contentResolver, emoji.name, uri)
+                      (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+                      Toast.makeText(this, "${emoji.name} copied", Toast.LENGTH_SHORT).show()
+                      vibrate()
+                  } catch (e: Exception) { Log.e(TAG, "clipboard fail", e) }
+              }
+
+              private fun getEmojiFile(emoji: EmojiItem): File {
+                  val dir = File(cacheDir, "emoji"); dir.mkdirs()
+                  val file = File(dir, emoji.fileName)
+                  if (!file.exists() || file.length() == 0L)
+                      FileOutputStream(file).use { emoji.bitmap?.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                  return file
+              }
+
+              // ═══════════════════════════════════
+              // UTILITIES
+              // ═══════════════════════════════════
+              private fun commitChar(c: String) {
+                  currentInputConnection?.commitText(c, 1)
+              }
+
+              private fun vibrate() {
+                  if (prefs.getBoolean("vibrate", true)) {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          vibrator?.vibrate(VibrationEffect.createOneShot(20, VibrationEffect.DEFAULT_AMPLITUDE))
+                      else @Suppress("DEPRECATION") vibrator?.vibrate(20)
                   }
               }
 
-              /**
-               * Отправляет эмодзи как изображение через Commit Content API
-               * Работает в Telegram, WhatsApp, Signal, Discord и др.
-               */
-              private fun commitEmojiImage(
-                  emoji: EmojiItem,
-                  ic: InputConnection,
-                  ei: EditorInfo
-              ): Boolean {
-                  return try {
-                      // 1. Сохраняем PNG в кэш
-                      val emojiDir = File(cacheDir, "emoji")
-                      emojiDir.mkdirs()
-                      val file = File(emojiDir, emoji.fileName)
-
-                      if (!file.exists() || file.length() == 0L) {
-                          FileOutputStream(file).use { out ->
-                              emoji.bitmap?.compress(
-                                  Bitmap.CompressFormat.PNG, 100, out
-                              )
-                          }
-                      }
-
-                      // 2. Получаем content:// URI через FileProvider
-                      val authority = "$packageName$AUTHORITY_SUFFIX"
-                      val contentUri: Uri = FileProvider.getUriForFile(
-                          this, authority, file
-                      )
-
-                      // 3. Создаём описание контента
-                      val description = ClipDescription(emoji.name, arrayOf(MIME_PNG))
-                      val contentInfo = InputContentInfoCompat(
-                          contentUri, description, null
-                      )
-
-                      // 4. Отправляем в приложение
-                      val flags = InputConnectionCompat
-                          .INPUT_CONTENT_GRANT_READ_URI_PERMISSION
-
-                      InputConnectionCompat.commitContent(
-                          ic, ei, contentInfo, flags, null
-                      )
-                  } catch (e: Exception) {
-                      Log.e(TAG, "commitContent failed: ${emoji.name}", e)
-                      false
-                  }
+              private fun animateKey(view: View) {
+                  try { view.startAnimation(AnimationUtils.loadAnimation(this, R.anim.key_press)) }
+                  catch (_: Exception) {}
               }
 
-              /**
-               * Копирует эмодзи в буфер обмена как картинку
-               * Запасной вариант для приложений без Commit Content API
-               */
-              private fun copyImageToClipboard(emoji: EmojiItem): Boolean {
-                  return try {
-                      val emojiDir = File(cacheDir, "emoji")
-                      emojiDir.mkdirs()
-                      val file = File(emojiDir, emoji.fileName)
-
-                      if (!file.exists() || file.length() == 0L) {
-                          FileOutputStream(file).use { out ->
-                              emoji.bitmap?.compress(
-                                  Bitmap.CompressFormat.PNG, 100, out
-                              )
-                          }
-                      }
-
-                      val authority = "$packageName$AUTHORITY_SUFFIX"
-                      val uri = FileProvider.getUriForFile(this, authority, file)
-
-                      val clipboard = getSystemService(CLIPBOARD_SERVICE)
-                          as android.content.ClipboardManager
-                      val clip = android.content.ClipData.newUri(
-                          contentResolver, emoji.name, uri
-                      )
-                      clipboard.setPrimaryClip(clip)
-
-                      // Даём разрешение на чтение
-                      grantUriPermission(
-                          "com.android.systemui",
-                          uri,
-                          android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                      )
-
-                      true
-                  } catch (e: Exception) {
-                      Log.e(TAG, "Clipboard copy failed: ${emoji.name}", e)
-                      false
-                  }
+              override fun onDestroy() {
+                  super.onDestroy()
+                  handler.removeCallbacks(backspaceRepeat)
               }
           }
           KOTLIN_EOF
 
-          # ── SettingsActivity.kt ──
+          # ══════════════════════════════════════
+          # SettingsActivity.kt
+          # ══════════════════════════════════════
           cat > "$K/SettingsActivity.kt" << 'EOF'
           package com.custom.keyboard
-
-          import android.content.Intent
-          import android.os.Bundle
-          import android.provider.Settings
-          import android.widget.Button
-          import android.widget.TextView
-          import android.widget.Toast
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.recyclerview.widget.GridLayoutManager
-          import androidx.recyclerview.widget.RecyclerView
-
+          import android.content.Intent; import android.os.Bundle; import android.provider.Settings
+          import android.widget.*; import androidx.appcompat.app.AppCompatActivity
+          import androidx.recyclerview.widget.GridLayoutManager; import androidx.recyclerview.widget.RecyclerView
           class SettingsActivity : AppCompatActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_settings)
-
+                  super.onCreate(savedInstanceState); setContentView(R.layout.activity_settings)
                   val emojis = EmojiLoader.loadAll(this)
-
                   findViewById<TextView>(R.id.tvInfo).text =
                       if (emojis.isEmpty()) getString(R.string.no_emoji)
-                      else getString(R.string.emoji_count, emojis.size)
-
+                      else "${getString(R.string.emoji_count, emojis.size)}\n\nTap = send as sticker\nLong press = copy to clipboard"
                   val rv = findViewById<RecyclerView>(R.id.rvPreview)
                   rv.layoutManager = GridLayoutManager(this, 5)
-                  rv.adapter = EmojiAdapter(emojis) {
-                      Toast.makeText(this, it.name, Toast.LENGTH_SHORT).show()
-                  }
-
+                  rv.adapter = EmojiAdapter(emojis,
+                      { Toast.makeText(this, it.name, Toast.LENGTH_SHORT).show() },
+                      { Toast.makeText(this, "Long: ${it.name}", Toast.LENGTH_SHORT).show() })
                   findViewById<Button>(R.id.btnSettings).setOnClickListener {
-                      startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
-                  }
+                      startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) }
               }
           }
           EOF
 
-          echo "✅ Kotlin-код создан"
+          echo "✅ All Kotlin code created"
 
-      - name: Copy PNG emoji to resources
+      - name: Copy emoji and generate catalog
         run: |
-          EMOJI_SRC="emoji"
-          DRAWABLE="app/src/main/res/drawable-nodpi"
           ASSETS="app/src/main/assets/emoji"
+          DRAWABLE="app/src/main/res/drawable-nodpi"
           count=0
-
-          for file in "$EMOJI_SRC"/*; do
-            [ ! -f "$file" ] && continue
-            filename=$(basename "$file")
-            ext_lower=$(echo "${filename##*.}" | tr '[:upper:]' '[:lower:]')
-            [ "$ext_lower" != "png" ] && continue
-
-            MAGIC=$(xxd -l 4 -p "$file" 2>/dev/null)
-            [ "$MAGIC" != "89504e47" ] && continue
-
-            safe=$(echo "${filename%.*}" \
-              | tr '[:upper:]' '[:lower:]' \
-              | sed 's/[^a-z0-9_]/_/g;s/__*/_/g;s/^_//;s/_$//')
+          for f in emoji/*; do
+            [ ! -f "$f" ] && continue
+            ext=$(echo "${f##*.}" | tr '[:upper:]' '[:lower:]')
+            [ "$ext" != "png" ] && continue
+            M=$(xxd -l 4 -p "$f" 2>/dev/null)
+            [ "$M" != "89504e47" ] && continue
+            fn=$(basename "$f")
+            safe=$(echo "${fn%.*}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_]/_/g;s/__*/_/g;s/^_//;s/_$//')
             [[ ! "$safe" =~ ^[a-z] ]] && safe="emoji_${safe}"
-
-            cp "$file" "$DRAWABLE/${safe}.png"
-            cp "$file" "$ASSETS/${safe}.png"
-            echo "  ✅ $filename → ${safe}.png"
-            count=$((count + 1))
+            cp "$f" "$DRAWABLE/${safe}.png"
+            cp "$f" "$ASSETS/${safe}.png"
+            count=$((count+1))
           done
+          echo "Copied: $count PNG"
 
-          echo "PNG скопировано: $count"
-
-      - name: Generate emoji catalog
-        run: |
-          CATALOG="app/src/main/assets/emoji/catalog.json"
-          echo "[" > "$CATALOG"
-          first=true
-
-          for file in app/src/main/assets/emoji/*.png; do
-            [ ! -f "$file" ] && continue
-            fn=$(basename "$file")
-            [ "$first" = true ] && first=false || echo "," >> "$CATALOG"
-            printf '  {"name":"%s","file":"%s"}' "${fn%.png}" "$fn" >> "$CATALOG"
+          # Catalog
+          CAT="$ASSETS/catalog.json"
+          echo "[" > "$CAT"; first=true
+          for f in "$ASSETS"/*.png; do
+            [ ! -f "$f" ] && continue; fn=$(basename "$f")
+            [ "$first" = true ] && first=false || echo "," >> "$CAT"
+            printf '  {"name":"%s","file":"%s"}' "${fn%.png}" "$fn" >> "$CAT"
           done
-
-          echo "" >> "$CATALOG"
-          echo "]" >> "$CATALOG"
-          cat "$CATALOG"
+          echo -e "\n]" >> "$CAT"
+          cat "$CAT"
 
       - name: Install Gradle Wrapper
         run: |
-          GRADLE_VER="8.5"
-          curl -sL "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -o /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp/
-          /tmp/gradle-${GRADLE_VER}/bin/gradle wrapper --gradle-version ${GRADLE_VER} --no-daemon
-          rm -rf /tmp/gradle*
-          chmod +x gradlew
-          ./gradlew --version
+          curl -sL "https://services.gradle.org/distributions/gradle-8.5-bin.zip" -o /tmp/g.zip
+          unzip -q /tmp/g.zip -d /tmp/
+          /tmp/gradle-8.5/bin/gradle wrapper --gradle-version 8.5 --no-daemon
+          rm -rf /tmp/gradle* /tmp/g.zip
+          chmod +x gradlew && ./gradlew --version
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -851,13 +1503,10 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon --stacktrace
         continue-on-error: true
 
-      - name: List APK files
-        run: find . -name "*.apk" -type f -exec ls -lh {} \;
-
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: CustomEmojiKeyboard-debug
+          name: NestorKeyboard-debug
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 90
           if-no-files-found: error
@@ -865,21 +1514,27 @@ jobs:
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: CustomEmojiKeyboard-release
+          name: NestorKeyboard-release
           path: app/build/outputs/apk/release/*.apk
           retention-days: 90
           if-no-files-found: warn
 
-      - name: Build Summary
+      - name: Summary
         if: always()
         run: |
-          echo "## 📱 Custom Emoji Keyboard" >> $GITHUB_STEP_SUMMARY
-          emoji_count=$(ls app/src/main/assets/emoji/*.png 2>/dev/null | wc -l)
-          echo "### 😀 PNG emoji: ${emoji_count}" >> $GITHUB_STEP_SUMMARY
-
-          if ls app/build/outputs/apk/debug/*.apk 1>/dev/null 2>&1; then
-            for apk in app/build/outputs/apk/debug/*.apk; do
-              sz=$(du -h "$apk" | cut -f1)
-              echo "- ✅ **Debug:** \`$(basename $apk)\` ($sz)" >> $GITHUB_STEP_SUMMARY
-            done
-          fi
+          echo "## 🎹 Nestor Keyboard Build" >> $GITHUB_STEP_SUMMARY
+          ec=$(ls app/src/main/assets/emoji/*.png 2>/dev/null | wc -l)
+          echo "### 😀 Emoji: ${ec}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎹 Features:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ QWERTY (EN/RU)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Numbers & Symbols" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Custom Emoji Stickers" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Shift / Caps Lock" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Backspace with repeat" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Haptic feedback" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Key animations" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Language switch (EN↔RU)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Dark theme" >> $GITHUB_STEP_SUMMARY
+          for apk in app/build/outputs/apk/debug/*.apk; do
+            [ -f "$apk" ] && echo "- 📦 **Debug:** \`$(basename $apk)\` ($(du -h "$apk"|cut -f1))" >> $GITHUB_STEP_SUMMARY
+          done
